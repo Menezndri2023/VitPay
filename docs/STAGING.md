@@ -41,7 +41,10 @@ Charge mesurée de la pile au repos : environ 1,5 à 2 Go de mémoire pour les 7
 Sécurisation automatique d'un serveur neuf (Ubuntu 24.04, clé SSH déposée chez l'hébergeur) :
 
 ```bash
+# Hetzner (clé sur root) :
 ssh -i ~/.ssh/vitpay_staging_ed25519 root@<IP> 'bash -s' < infra/staging/scripts/bootstrap-server.sh
+# OVHcloud (clé sur l'utilisateur « ubuntu ») :
+ssh -i ~/.ssh/vitpay_staging_ed25519 ubuntu@<IP> 'sudo bash -s' < infra/staging/scripts/bootstrap-server.sh
 ssh -i ~/.ssh/vitpay_staging_ed25519 vitpay@<IP>     # la connexion root est ensuite désactivée
 ```
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # VITPAY STAGING — sécurisation initiale d'un VPS Ubuntu 24.04 neuf (à lancer UNE fois, en root).
-# Usage : ssh root@<ip> 'bash -s' < infra/staging/scripts/bootstrap-server.sh
+# Usage :
+#   Hetzner (clé sur root)    : ssh root@<ip>   'bash -s'      < infra/staging/scripts/bootstrap-server.sh
+#   OVHcloud (clé sur ubuntu) : ssh ubuntu@<ip> 'sudo bash -s' < infra/staging/scripts/bootstrap-server.sh
 #
 # Effets :
 #   - utilisateur « vitpay » (sudo, clé SSH reprise de root), connexion root et mots de passe SSH désactivés ;
@@ -12,7 +14,11 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "à lancer en root" >&2; exit 1; }
 . /etc/os-release
 [ "${ID:-}" = ubuntu ] || { echo "Ubuntu attendu (24.04 LTS)" >&2; exit 1; }
-[ -s /root/.ssh/authorized_keys ] || { echo "aucune clé SSH sur root : refus (risque de se fermer l'accès)" >&2; exit 1; }
+# Clé SSH de départ : celle de l'utilisateur qui lance le script via sudo (OVHcloud : « ubuntu »), sinon root.
+SRC_HOME="/root"
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then SRC_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"; fi
+KEYS="$SRC_HOME/.ssh/authorized_keys"
+[ -s "$KEYS" ] || { echo "aucune clé SSH dans $KEYS : refus (risque de se fermer l'accès)" >&2; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
 REPO="${VITPAY_REPO:-https://github.com/Menezndri2023/VitPay.git}"
 BRANCH="${VITPAY_BRANCH:-feat/mvp-model-a}"
@@ -26,7 +32,7 @@ echo "2/6 Utilisateur d'exploitation « vitpay »"
 id vitpay >/dev/null 2>&1 || adduser --disabled-password --gecos "VITPAY staging" vitpay
 usermod -aG sudo vitpay
 install -d -m 700 -o vitpay -g vitpay /home/vitpay/.ssh
-install -m 600 -o vitpay -g vitpay /root/.ssh/authorized_keys /home/vitpay/.ssh/authorized_keys
+install -m 600 -o vitpay -g vitpay "$KEYS" /home/vitpay/.ssh/authorized_keys
 echo "vitpay ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-vitpay && chmod 440 /etc/sudoers.d/90-vitpay
 
 echo "3/6 SSH : clés uniquement, pas de connexion root"
