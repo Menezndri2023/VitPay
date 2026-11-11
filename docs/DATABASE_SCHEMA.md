@@ -9,6 +9,8 @@ Migrations SQL versionnées dans [`apps/api/migrations`](../apps/api/migrations)
 | `003_ledger` | `ledger_accounts`, `journal_entries`, `postings` + triggers d'équilibre (différés), de cohérence et d'immuabilité |
 | `004_mock_psp` | Schéma `mock_psp` : prestataire simulé, séparé, représentant un système externe |
 | `005_security` | RLS sur toutes les tables métier, droits de `vitpay_app` (révocation d'UPDATE et DELETE sur les tables immuables) |
+| `006_review_hardening` | Corrections de la revue : trigger ledger SECURITY DEFINER, unicités scopées, anti-rejeu MFA, jeton d'enrôlement admin |
+| `007_system_role` | Rôle `vitpay_system`, politiques sans contournement, moindre privilège, RLS sur `incidents` et `outbox_events` |
 
 ## Relations principales
 
@@ -38,6 +40,7 @@ provider_accounts 1─n webhook_inbox · payouts · reconciliation_runs 1─n re
 | Rôle | Usage |
 |---|---|
 | `vitpay_owner` | Migrations uniquement |
-| `vitpay_app` | Application : pas de `BYPASSRLS`, pas d'UPDATE ni DELETE sur `journal_entries`, `postings` et `audit_log`, aucune écriture sur `currencies` |
+| `vitpay_app` | Requêtes d'une organisation : RLS stricte, **aucun moyen de contournement** ; pas d'UPDATE ni DELETE sur `journal_entries`, `postings`, `audit_log`, `users`, `incidents` ; aucun accès à `sessions`, `idempotency_keys`, `webhook_inbox`, `approval_requests`, `mock_psp` |
+| `vitpay_system` | Chemins transverses justifiés (authentification, page publique, webhooks, admin, workers) : `BYPASSRLS`, identifiants distincts, mêmes interdictions d'immuabilité |
 
 `audit_log`, `users`, `sessions`, `idempotency_keys`, `outbox_events`, `webhook_inbox` et `incidents` ne sont pas sous RLS. Ce sont des tables de plateforme, et tout accès Business y est filtré explicitement par organisation.

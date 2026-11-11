@@ -10,6 +10,8 @@ const EnvSchema = z
     PORT: z.coerce.number().int().positive().default(4710),
     DATABASE_URL: z.string().url(),
     DATABASE_OWNER_URL: z.string().url().optional(),
+    /** Rôle système (BYPASSRLS) : uniquement pour les chemins transverses justifiés. */
+    DATABASE_SYSTEM_URL: z.string().url(),
     /** Clé AES-256 (32 octets, base64) pour chiffrer les identifiants prestataires et secrets MFA. */
     APP_ENCRYPTION_KEY: z
       .string()

@@ -44,9 +44,9 @@ Durcissements associés : unicités scopées (référence prestataire par compte
 
 1. **Test d'intrusion externe** et revue OWASP ASVS niveau 2.
 2. Rotation des clés : versionner `APP_ENCRYPTION_KEY` (préfixe `v1.` déjà en place), procédure de re-chiffrement.
-3. Rôle PostgreSQL distinct avec `BYPASSRLS` pour les chemins système, au lieu de la variable `app.rls_bypass`, plus `FORCE ROW LEVEL SECURITY`. Étendre la RLS à `incidents`, `webhook_inbox`, `outbox_events` et `approval_requests`.
+3. ☑ Rôle PostgreSQL distinct `vitpay_system` (BYPASSRLS) pour les chemins système ; plus de variable de contournement ; moindre privilège du rôle applicatif (aucun accès aux sessions, webhooks, idempotence, approbations, prestataire simulé ; pas de modification des utilisateurs) — migration 007, testé.
 4. Limitation de débit distribuée (stockage partagé) dès qu'il y a plusieurs instances ; plafonner les webhooks rejetés stockés.
-4b. Outbox : verrouiller et valider événement par événement plutôt que par lot.
+4b. ☑ Outbox : chaque événement est verrouillé et validé dans sa propre transaction.
 5. Signalement d'abus sur la page publique (anti-hameçonnage) et domaine `pay.` dédié.
 6. WAF et protection DDoS (fournisseur à choisir).
 7. Monitoring et alerting des incidents critiques (Sentry, astreinte).

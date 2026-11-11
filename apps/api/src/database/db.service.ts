@@ -14,8 +14,9 @@ export interface TxOptions {
   /** Restreint la transaction à une organisation (RLS). */
   orgId?: string;
   /**
-   * Lecture/écriture transverse aux organisations. Réservé aux chemins explicitement
-   * justifiés : authentification, page publique, administration, workers système.
+   * Lecture/écriture transverse aux organisations, via le rôle `vitpay_system` (connexion distincte).
+   * Réservé aux chemins explicitement justifiés : authentification, page publique, webhooks,
+   * administration, workers. Le rôle applicatif n'a AUCUN moyen de contourner la RLS.
    */
   bypassRls?: boolean;
   isolation?: 'READ COMMITTED' | 'REPEATABLE READ' | 'SERIALIZABLE';
@@ -49,22 +50,24 @@ class ClientTx implements Tx {
 
 @Injectable()
 export class Db implements OnModuleDestroy {
+  /** Pool du rôle applicatif (RLS stricte). */
   readonly pool: Pool;
+  /** Pool du rôle système (BYPASSRLS). */
+  private readonly systemPool: Pool;
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
     this.pool = new Pool({ connectionString: config.DATABASE_URL, max: 20, application_name: 'vitpay-api' });
+    this.systemPool = new Pool({ connectionString: config.DATABASE_SYSTEM_URL, max: 10, application_name: 'vitpay-api-system' });
   }
 
   async tx<T>(fn: (tx: Tx) => Promise<T>, opts: TxOptions = {}): Promise<T> {
     if (opts.orgId && !UUID_RE.test(opts.orgId)) throw new Error('Invalid orgId');
-    const client = await this.pool.connect();
+    if (opts.orgId && opts.bypassRls) throw new Error('orgId and bypassRls are mutually exclusive');
+    const client = await (opts.bypassRls ? this.systemPool : this.pool).connect();
     try {
       await client.query(`BEGIN ISOLATION LEVEL ${opts.isolation ?? 'READ COMMITTED'}`);
       // set_config(..., true) = portée transaction (équivalent SET LOCAL), paramétré (pas d'injection).
-      await client.query(`SELECT set_config('app.org_id', $1, true), set_config('app.rls_bypass', $2, true)`, [
-        opts.orgId ?? '',
-        opts.bypassRls ? 'on' : 'off',
-      ]);
+      await client.query(`SELECT set_config('app.org_id', $1, true)`, [opts.orgId ?? '']);
       const result = await fn(new ClientTx(client, opts.orgId ?? null));
       await client.query('COMMIT');
       return result;
@@ -87,7 +90,7 @@ export class Db implements OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.pool.end();
+    await Promise.all([this.pool.end(), this.systemPool.end()]);
   }
 }
 

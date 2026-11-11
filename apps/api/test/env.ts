@@ -8,6 +8,7 @@ export const TEST_ENV = {
   NODE_ENV: 'test',
   PORT: String(TEST_PORT),
   DATABASE_URL: process.env.TEST_DATABASE_URL ?? `postgres://vitpay_app:dev_app_password_change_me@${host}:${port}/vitpay_test`,
+  DATABASE_SYSTEM_URL: process.env.TEST_DATABASE_SYSTEM_URL ?? `postgres://vitpay_system:dev_system_password_change_me@${host}:${port}/vitpay_test`,
   DATABASE_OWNER_URL: process.env.TEST_DATABASE_OWNER_URL ?? `postgres://vitpay_owner:dev_owner_password_change_me@${host}:${port}/vitpay_test`,
   APP_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
   PUBLIC_API_URL: `http://127.0.0.1:${TEST_PORT}`,

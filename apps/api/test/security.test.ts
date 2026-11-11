@@ -26,6 +26,21 @@ describe('sécurité et isolation', () => {
     expect(rows.length).toBe(0);
   });
 
+  it('le rôle applicatif ne peut pas contourner la RLS ni lire les tables de plateforme (simulation d’injection SQL)', async () => {
+    const a = await registerMerchant(ctx, 'inj-a@iso.test', 'Org Inj A');
+    const b = await registerMerchant(ctx, 'inj-b@iso.test', 'Org Inj B');
+    const seen = await ctx.db.forOrg(a.orgId, async (tx) => {
+      // Ce que pourrait tenter une injection : réactiver l'ancien interrupteur ou changer d'organisation… dans la même requête.
+      await tx.query(`SELECT set_config('app.rls_bypass', 'on', true)`);
+      return tx.query<{ id: string }>('SELECT id FROM organizations');
+    });
+    expect(seen.map((r) => r.id)).toEqual([a.orgId]);
+    expect(seen.map((r) => r.id)).not.toContain(b.orgId);
+    await expect(ctx.db.forOrg(a.orgId, (tx) => tx.query('SELECT token_hash FROM sessions'))).rejects.toThrow(/permission denied/);
+    await expect(ctx.db.forOrg(a.orgId, (tx) => tx.query('SELECT * FROM mock_psp.merchants'))).rejects.toThrow(/permission denied/);
+    await expect(ctx.db.forOrg(a.orgId, (tx) => tx.query(`UPDATE users SET platform_role = 'super_admin'`))).rejects.toThrow(/permission denied/);
+  });
+
   it('rôles : un caissier ne peut ni rembourser ni gérer les prestataires', async () => {
     const owner = await registerMerchant(ctx, 'owner@roles.test');
     await ctx.api().post('/v1/auth/register').send({ email: 'cashier@roles.test', password: PASSWORD, fullName: 'Caissier', organizationName: 'Perso' });

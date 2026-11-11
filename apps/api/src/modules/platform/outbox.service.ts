@@ -37,49 +37,51 @@ export class OutboxService {
     this.handlers.set(eventType, list);
   }
 
-  /** Traite un lot d'événements. Retourne le nombre d'événements traités. */
+  /**
+   * Traite jusqu'à `limit` événements. Chaque événement est verrouillé, traité et validé
+   * dans SA propre transaction : un échec n'entraîne jamais le rejeu des autres.
+   */
   async processBatch(limit = 50): Promise<number> {
-    return this.db.system(async (tx) => {
-      const rows = await tx.query<{
-        id: string;
-        event_type: string;
-        aggregate_type: string;
-        aggregate_id: string;
-        org_id: string | null;
-        payload: Record<string, unknown>;
-        attempts: number;
-      }>(
-        `SELECT id, event_type, aggregate_type, aggregate_id, org_id, payload, attempts
-           FROM outbox_events
-          WHERE processed_at IS NULL AND available_at <= now()
-          ORDER BY id
-          LIMIT $1
-          FOR UPDATE SKIP LOCKED`,
+    const candidates = await this.db.system((tx) =>
+      tx.query<{ id: string }>(
+        `SELECT id FROM outbox_events WHERE processed_at IS NULL AND available_at <= now() ORDER BY id LIMIT $1`,
         [limit],
-      );
-      for (const r of rows) {
-        const event: OutboxEvent = {
-          id: r.id,
-          eventType: r.event_type,
-          aggregateType: r.aggregate_type,
-          aggregateId: r.aggregate_id,
-          orgId: r.org_id,
-          payload: r.payload,
-        };
+      ),
+    );
+    let processed = 0;
+    for (const c of candidates) {
+      const done = await this.db.system(async (tx) => {
+        const r = await tx.maybeOne<{
+          id: string;
+          event_type: string;
+          aggregate_type: string;
+          aggregate_id: string;
+          org_id: string | null;
+          payload: Record<string, unknown>;
+          attempts: number;
+        }>(
+          `SELECT id, event_type, aggregate_type, aggregate_id, org_id, payload, attempts FROM outbox_events
+            WHERE id = $1 AND processed_at IS NULL FOR UPDATE SKIP LOCKED`,
+          [c.id],
+        );
+        if (!r) return false; // déjà pris par une autre instance
+        const event: OutboxEvent = { id: r.id, eventType: r.event_type, aggregateType: r.aggregate_type, aggregateId: r.aggregate_id, orgId: r.org_id, payload: r.payload };
         try {
           for (const h of this.handlers.get(r.event_type) ?? []) await h(event);
           await tx.query('UPDATE outbox_events SET processed_at = now(), attempts = attempts + 1 WHERE id = $1', [r.id]);
+          return true;
         } catch (err) {
           const backoffSec = Math.min(3600, 2 ** Math.min(r.attempts + 1, 12));
           this.logger.warn({ msg: 'outbox handler failed', id: r.id, type: r.event_type, err: (err as Error).message });
           await tx.query(
-            `UPDATE outbox_events SET attempts = attempts + 1, last_error = $2,
-               available_at = now() + make_interval(secs => $3) WHERE id = $1`,
+            `UPDATE outbox_events SET attempts = attempts + 1, last_error = $2, available_at = now() + make_interval(secs => $3) WHERE id = $1`,
             [r.id, (err as Error).message.slice(0, 1000), backoffSec],
           );
+          return false;
         }
-      }
-      return rows.length;
-    });
+      });
+      if (done) processed += 1;
+    }
+    return processed;
   }
 }
