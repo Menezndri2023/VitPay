@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } f
 import { APP_CONFIG, AppConfig } from '../../config';
 import { PaymentsService } from '../payments/payments.service';
 import { DevelopersService } from '../developers/developers.service';
+import { Db } from '../../database/db.service';
 import { AccountCleanupService } from '../identity/account-cleanup.service';
 import { EmailService } from '../email/email.service';
 import { OutboxService } from '../platform/outbox.service';
@@ -25,6 +26,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly email: EmailService,
     private readonly developers: DevelopersService,
     private readonly cleanup: AccountCleanupService,
+    private readonly db: Db,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -35,6 +37,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.every('sync-stale-attempts', 60_000, () => this.payments.syncStaleAttempts());
     this.every('send-emails', 5_000, () => this.email.processQueue());
     this.every('deliver-webhooks', 3_000, () => this.developers.deliverDue());
+    this.every('purge-rate-limits', 300_000, () => this.db.system((tx) => tx.query(`DELETE FROM rate_limits WHERE expires_at < now() - interval '1 hour' AND (blocked_until IS NULL OR blocked_until < now())`)));
     this.every('release-unverified-accounts', 3_600_000, () => this.cleanup.releaseUnverified());
     this.logger.log('background jobs started');
   }

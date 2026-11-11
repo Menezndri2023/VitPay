@@ -34,6 +34,8 @@ Chaque décision importante est consignée ici. **Aucune ne doit être modifiée
 ## ADR-007 — File de tâches PostgreSQL (SKIP LOCKED) plutôt que Redis/BullMQ
 - **Statut** : 🟢 — Moins de composants au MVP ; l'outbox est transactionnelle par construction. **Réversible** : BullMQ/Redis si les volumes l'exigent (nouvel ADR).
 
+> Complément (11/11/2026) : les compteurs de limitation de débit utilisent aussi PostgreSQL (table `UNLOGGED rate_limits`), partagés par toutes les instances. Seuil de bascule vers Redis : quand la latence ajoutée par requête devient mesurable en production.
+
 ## ADR-008 — Isolation multi-tenant par RLS PostgreSQL
 - **Statut** : ✅ — Défense en profondeur : même une requête applicative non filtrée ne voit que l'organisation courante. Le bypass est explicite (`Db.system`) et limité.
 

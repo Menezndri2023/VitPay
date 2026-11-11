@@ -130,7 +130,7 @@ Restant (R5-9, défense en profondeur) : lier chaque chiffré à son contexte (t
    Retour arrière : la version actuelle lit les deux formats ; ne pas revenir à une version antérieure au 11/11/2026 (format v1 seul) après écriture de valeurs v2.
    Un test vérifie que toute nouvelle colonne `*_enc` est couverte par la rotation.
 3. ☑ Rôle PostgreSQL distinct `vitpay_system` (BYPASSRLS) pour les chemins système ; plus de variable de contournement ; moindre privilège du rôle applicatif (aucun accès aux sessions, webhooks, idempotence, approbations, prestataire simulé ; pas de modification des utilisateurs) — migration 007, testé.
-4. Limitation de débit distribuée (stockage partagé) dès qu'il y a plusieurs instances ; plafonner les webhooks rejetés stockés.
+4. ☑ Limitation de débit partagée entre instances (compteurs PostgreSQL, table non journalisée, une requête atomique par appel, purge périodique ; `rate-limit.test.ts`). ☐ Plafonner les webhooks rejetés stockés. À forte charge : déplacer les compteurs vers un stockage mémoire partagé (ADR-007).
 4b. ☑ Outbox : chaque événement est verrouillé et validé dans sa propre transaction.
 5. Signalement d'abus sur la page publique (anti-hameçonnage) et domaine `pay.` dédié.
 6. WAF et protection DDoS (fournisseur à choisir).

@@ -10,6 +10,8 @@ import { AdminService } from './modules/admin/admin.service';
 import { DevelopersController } from './modules/developers/developers.controller';
 import { DevelopersService } from './modules/developers/developers.service';
 import { EmailService } from './modules/email/email.service';
+import { Db } from './database/db.service';
+import { PgThrottlerStorage } from './modules/platform/pg-throttler.storage';
 import { KeyRotationService } from './modules/security/key-rotation.service';
 import { AccountCleanupService } from './modules/identity/account-cleanup.service';
 import { EmailVerificationService } from './modules/identity/email-verification.service';
@@ -80,10 +82,15 @@ export class AppModule {
         { module: ConfigModule, global: true },
         DatabaseModule,
         PlatformModule,
-        ThrottlerModule.forRoot({
-          throttlers: [{ name: 'default', ttl: 60_000, limit: 300 }],
-          // Les tests automatisés enchaînent des centaines d'appels : limitation désactivée en NODE_ENV=test uniquement.
-          skipIf: () => config.NODE_ENV === 'test',
+        ThrottlerModule.forRootAsync({
+          inject: [Db],
+          useFactory: (db: Db) => ({
+            throttlers: [{ name: 'default', ttl: 60_000, limit: 300 }],
+            // Compteurs partagés par toutes les instances (PostgreSQL) : la limite ne se multiplie pas avec elles.
+            storage: new PgThrottlerStorage(db),
+            // Les tests automatisés enchaînent des centaines d'appels : limitation désactivée en NODE_ENV=test uniquement.
+            skipIf: () => config.NODE_ENV === 'test',
+          }),
         }),
       ],
       controllers,
