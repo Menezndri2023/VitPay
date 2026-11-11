@@ -35,11 +35,6 @@ export class AuditService {
    * verrou consultatif transactionnel.
    */
   async record(tx: Tx, e: AuditEntry): Promise<void> {
-    await tx.query('SELECT pg_advisory_xact_lock($1)', [AUDIT_LOCK_KEY]);
-    // Dernière empreinte de la chaîne GLOBALE, via une fonction dédiée : le rôle applicatif ne
-    // lit le journal que pour son organisation (RLS, migration 020).
-    const last = await tx.one<{ hash: Buffer | null }>('SELECT audit_last_hash() AS hash');
-    const prevHash = last.hash ?? null;
     const occurredAt = new Date().toISOString();
     const content = {
       occurredAt,
@@ -54,29 +49,24 @@ export class AuditService {
       after: e.after ?? null,
       metadata: e.actor.apiKeyId ? { ...((e.metadata as Record<string, unknown>) ?? {}), apiKeyId: e.actor.apiKeyId } : (e.metadata ?? null),
     };
-    const hash = sha256(Buffer.concat([prevHash ?? Buffer.alloc(0), Buffer.from(canonicalJson(content))]));
-    await tx.query(
-      `INSERT INTO audit_log (occurred_at, actor_type, actor_user_id, org_id, action, target_type, target_id,
-         reason, ip, user_agent, before, after, metadata, prev_hash, hash)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [
-        occurredAt,
-        content.actorType,
-        content.actorUserId,
-        content.orgId,
-        content.action,
-        content.targetType,
-        content.targetId,
-        content.reason,
-        e.actor.ip ?? null,
-        e.actor.userAgent ?? null,
-        jsonOrNull(content.before),
-        jsonOrNull(content.after),
-        jsonOrNull(content.metadata),
-        prevHash,
-        hash,
-      ],
-    );
+    // [R7-9] Chaînage calculé EN BASE (fonction audit_append, migration 023), sous verrou :
+    // aucune écriture directe dans audit_log par les rôles applicatif et système.
+    await tx.query('SELECT audit_append($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)', [
+      occurredAt,
+      content.actorType,
+      content.actorUserId,
+      content.orgId,
+      content.action,
+      content.targetType,
+      content.targetId,
+      content.reason,
+      e.actor.ip ?? null,
+      e.actor.userAgent ?? null,
+      jsonOrNull(content.before),
+      jsonOrNull(content.after),
+      jsonOrNull(content.metadata),
+      canonicalJson(content),
+    ]);
   }
 
   /** Vérifie l'intégrité de toute la chaîne. Retourne l'id de la première entrée corrompue, ou null. */

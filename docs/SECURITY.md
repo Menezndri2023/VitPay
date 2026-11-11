@@ -13,6 +13,7 @@
 | Webhooks sortants (SSRF) | HTTPS obligatoire en production ; adresses privées, loopback, link-local, métadonnées cloud refusées **à la connexion** (anti DNS rebinding) ; pas de redirection suivie ; délai 10 s ; signature HMAC + horodatage | `developers.test.ts` |
 | Vérification e-mail | Lien à jeton haché (48 h, usage unique, dernier envoi seul valide, 3 envois/h) ; tant qu'elle manque : connexion d'un prestataire, équipe, intégrations, dossier KYB et remboursements refusés (`email_not_verified`) ; les liens de réinitialisation et d'invitation valent aussi vérification | `accounts.test.ts` |
 | Rotation secret webhook | Nouveau secret affiché une fois ; ancien accepté pendant un recouvrement (0 à 168 h, double `v1`) ; rotation d'urgence immédiate ; journalisée | `developers.test.ts` |
+| TPE (carte présente) | Aucune donnée de carte chez VITPAY ; un encaissement à la fois par terminal ; terminal cloisonné par organisation et limité au mode de son compte ; confirmation par relecture serveur ; annulation à distance journalisée | `terminals.test.ts`, e2e |
 | Invitations | Jeton à usage unique (7 j), acceptation réservée à l'e-mail invité ; redirections `next` limitées aux chemins internes | `accounts.test.ts` |
 | Sessions | Jeton opaque de 256 bits, **seul le hash SHA-256 est stocké**, expiration 12 h (Business) / 4 h (Admin), révocation à la déconnexion | |
 | MFA | TOTP ; **obligatoire pour l'admin** (enrôlement forcé), secret chiffré AES-256-GCM | `admin.test.ts` |
@@ -144,7 +145,18 @@ Restant (R5-9, défense en profondeur) : lier chaque chiffré à son contexte (t
 | R7-10 | Identifiants du seed staging exposés aux journaux collectés | Terminal interactif obligatoire hors local |
 | (constat) | Limitation de débit : la saturation du pool dédié laissait passer les requêtes | Compteur local de repli (limitation maintenue) |
 
-Restant (R7-9, défense en profondeur) : insertion dans le journal d'audit par une fonction `SECURITY DEFINER` calculant l'empreinte, pour qu'une injection SQL sous le rôle applicatif ne puisse pas ajouter de lignes orphelines.
+R7-9 traité ensuite (migration 023) : le journal d'audit n'est plus alimenté que par la fonction `audit_append` (empreinte chaînée calculée en base sous verrou, organisation contrôlée) ; plus aucune insertion directe par les rôles applicatif et système (`transactions.test.ts`).
+
+## Huitième revue indépendante (11/11/2026) — TPE et journal d'audit
+
+| # | Défaut | Correction |
+|---|---|---|
+| R8-P1 | **Élevé (plausible)** — erreur ambiguë du fournisseur (délai) : tentative marquée échouée alors que le montant restait affiché sur le terminal (double paiement possible) | Seul un refus définitif (4xx) clôt la tentative ; sinon elle reste active, aucun second paiement possible, puis réconciliation (`terminals.test.ts`) |
+| R8-C2 | Tentative terminal bloquée en « created » (plantage entre l'envoi et l'enregistrement) | Récupération en tâche de fond : nouvel envoi idempotent puis relecture de l'état |
+| R8-C1 | `audit_append` ne liait pas l'empreinte à la ligne insérée ; date d'événement fournie par l'appelant | Contenu canonique vérifié contre les colonnes ; date antidatée refusée (migration 024) |
+| R8-C3 | Une clé API pouvait envoyer des montants vers les TPE ; URL du TPE simulé exposée aux rôles en lecture | Terminaux réservés aux sessions humaines ; URL du simulateur seulement pour qui encaisse |
+| R8-P2 | Interblocage possible (journal d'audit / demande) | Ordre de verrouillage constant : tentative → demande → journal |
+| R8-P3/P4 | Chaîne d'audit sensible au niveau d'isolation ; contrôle d'organisation lié à un nom de rôle | READ COMMITTED exigé ; contrôle pour tout rôle sans BYPASSRLS |
 
 ## À faire avant la production
 

@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Currency, isCurrency, Money } from '@vitpay/money';
 import { APP_CONFIG, AppConfig } from '../../config';
 import { hmacSha256Hex, safeEqualHex } from '../../common/crypto';
-import { Errors } from '../../common/errors';
+import { AppError, Errors } from '../../common/errors';
 import {
   CreatePaymentInput,
   PaymentProvider,
@@ -17,6 +17,7 @@ import {
   VerifiedProviderEvent,
   WebhookVerificationError,
 } from './provider.interface';
+import { CreateTerminalPaymentInput, TerminalCapabilities, TerminalInfo, TerminalPayment, TerminalProvider } from './terminal.interface';
 
 const WEBHOOK_TOLERANCE_SEC = 300;
 
@@ -26,7 +27,7 @@ const WEBHOOK_TOLERANCE_SEC = 300;
  * Il sert de modèle pour les adaptateurs réels (voir docs/PAYMENT_FLOWS.md §Ajouter un prestataire).
  */
 @Injectable()
-export class MockProvider implements PaymentProvider {
+export class MockProvider implements PaymentProvider, TerminalProvider {
   readonly code = 'mock';
   readonly displayName = 'Prestataire simulé (sandbox)';
   readonly supportedModes = ['sandbox' as const];
@@ -62,6 +63,13 @@ export class MockProvider implements PaymentProvider {
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     });
+    if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+      // Refus explicite du prestataire (ex. terminal occupé, ressource inconnue) : remonté comme
+      // DÉFINITIF, distinct d'une indisponibilité (5xx, délai) dont l'issue est inconnue.
+      const b = (await res.json().catch(() => ({}))) as { code?: string; title?: string };
+      if (res.status === 409) throw Errors.conflict(b.code ?? 'provider_conflict', b.title ?? 'Conflict at the payment provider');
+      throw new AppError(b.code ?? 'provider_rejected', res.status === 404 ? 404 : 422, b.title ?? 'Rejected by the payment provider');
+    }
     if (!res.ok) throw Errors.provider(`Mock PSP ${method} ${path} failed with ${res.status}`);
     return (await res.json()) as T;
   }
@@ -112,6 +120,46 @@ export class MockProvider implements PaymentProvider {
       fee: Money.of(p.fee_minor, currency),
       failureCode: p.failure_code ?? undefined,
     };
+  }
+
+  // ───────────── TPE simulé (carte présente) ─────────────
+
+  terminalCapabilities(): TerminalCapabilities {
+    return { remoteInitiation: true, remoteCancel: true, refunds: 'remote', webhooks: true, settlementReports: true };
+  }
+
+  async provisionSandboxTerminal(account: ProviderAccountContext, label: string): Promise<TerminalInfo> {
+    const t = await this.call<{ id: string; label: string; status: string }>(account, 'POST', '/terminals', { label });
+    return { terminalRef: t.id, label: t.label, status: t.status === 'online' ? 'online' : 'offline' };
+  }
+
+  simulatorUrl(terminalRef: string): string {
+    return `${this.config.PUBLIC_API_URL}/mock-psp/terminal/${encodeURIComponent(terminalRef)}`;
+  }
+
+  async listTerminals(account: ProviderAccountContext): Promise<TerminalInfo[]> {
+    const list = await this.call<{ id: string; label: string; status: string }[]>(account, 'GET', '/terminals');
+    return list.map((t) => ({ terminalRef: t.id, label: t.label, status: t.status === 'online' ? 'online' : 'offline' }));
+  }
+
+  async createTerminalPayment(account: ProviderAccountContext, input: CreateTerminalPaymentInput): Promise<TerminalPayment> {
+    const p = await this.call<{ id: string }>(
+      account,
+      'POST',
+      `/terminals/${encodeURIComponent(input.terminalRef)}/payments`,
+      { externalRef: input.attemptId, amountMinor: input.amount.minor.toString(), currency: input.amount.currency, description: input.label },
+      `terminal:${input.attemptId}`,
+    );
+    return this.getTerminalPayment(account, p.id, input.terminalRef);
+  }
+
+  async getTerminalPayment(account: ProviderAccountContext, providerRef: string, terminalRef = ''): Promise<TerminalPayment> {
+    return { ...(await this.getPayment(account, providerRef)), terminalRef };
+  }
+
+  async cancelTerminalPayment(account: ProviderAccountContext, providerRef: string): Promise<TerminalPayment> {
+    await this.call(account, 'POST', `/payments/${encodeURIComponent(providerRef)}/cancel`);
+    return this.getTerminalPayment(account, providerRef);
   }
 
   async refund(account: ProviderAccountContext, input: { providerRef: string; amount: Money; refundId: string }, idempotencyKey: string): Promise<ProviderRefund> {

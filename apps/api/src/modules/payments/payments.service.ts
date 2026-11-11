@@ -10,6 +10,7 @@ import { paymentSucceededEntry } from '../ledger/posting-rules';
 import { LedgerService } from '../ledger/ledger.service';
 import { IncidentsService } from '../platform/incidents.service';
 import { OutboxService } from '../platform/outbox.service';
+import { isTerminalProvider } from '../providers/terminal.interface';
 import { ProviderAccountRow, ProviderRegistry } from '../providers/provider-registry';
 import { PaymentMethod, ProviderMode, ProviderPayment } from '../providers/provider.interface';
 import {
@@ -50,7 +51,9 @@ export interface PaymentAttemptRow {
   provider_account_id: string;
   provider_code: string;
   provider_ref: string | null;
-  method: PaymentMethod;
+  /** `card_present` : encaissement sur terminal (TPE), voir TerminalsService. */
+  method: PaymentMethod | 'card_present';
+  terminal_id?: string | null;
   status: PaymentAttemptStatus;
   amount_minor: string;
   currency: Currency;
@@ -240,6 +243,7 @@ export class PaymentsService {
       providerCode: a.provider_code,
       providerRef: a.provider_ref,
       method: a.method,
+      terminalId: a.terminal_id ?? null,
       status: a.status,
       amount: money(a.amount_minor, a.currency),
       providerFee: a.provider_fee_minor === null ? null : money(a.provider_fee_minor, a.currency),
@@ -551,7 +555,12 @@ export class PaymentsService {
     });
     if (!attempt.provider_ref) return;
     const provider = this.providers.get(account.provider_code);
-    const payment = await provider.getPayment(this.providers.context(account), attempt.provider_ref);
+    const ctx = this.providers.context(account);
+    // Encaissement terminal : relecture par l'interface terminal du fournisseur.
+    const payment =
+      attempt.method === 'card_present' && isTerminalProvider(provider)
+        ? await provider.getTerminalPayment(ctx, attempt.provider_ref)
+        : await provider.getPayment(ctx, attempt.provider_ref);
     await this.applyProviderPayment(account, payment, { type: 'system' });
   }
 
@@ -566,6 +575,9 @@ export class PaymentsService {
         payment.externalRef,
         account.id,
       ]);
+      // [R8-P2] Ordre de verrouillage constant (tentative → demande → journal d'audit) : pas
+      // d'interblocage avec la création ou l'annulation d'une demande (demande → journal).
+      if (attempt) await tx.query('SELECT 1 FROM payment_requests WHERE id = $1 FOR UPDATE', [attempt.payment_request_id]);
       if (!attempt) {
         await this.incidents.open(tx, {
           orgId,

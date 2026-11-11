@@ -137,6 +137,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                   <td className="vp-small">{formatDate(a.createdAt)}</td>
                   <td className="vp-small">
                     {a.providerCode} <span className="vp-mono vp-muted">{a.providerRef ?? ''}</span>
+                    {a.method === 'card_present' && <div className="vp-small vp-muted">Carte présente (TPE)</div>}
                   </td>
                   <td>
                     <StatusBadge status={a.status} label={STATUS_LABELS[a.status]} />

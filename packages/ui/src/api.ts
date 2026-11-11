@@ -21,6 +21,7 @@ export interface ApiOptions {
 const FRIENDLY: Record<string, string> = {
   email_not_verified: 'Confirmez d’abord votre adresse e-mail avec le lien reçu.',
   kyb_required: 'Votre dossier KYB doit être vérifié avant d’inviter des collaborateurs.',
+  terminal_busy: 'Le TPE affiche déjà un autre encaissement.',
 };
 
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {

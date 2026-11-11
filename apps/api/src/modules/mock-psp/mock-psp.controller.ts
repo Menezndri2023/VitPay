@@ -14,6 +14,13 @@ const CreatePayment = z.object({
   description: z.string().max(500).optional(),
   returnUrl: z.string().url(),
 });
+const CreateTerminal = z.object({ label: z.string().trim().min(2).max(60) });
+const CreateTerminalPayment = z.object({
+  externalRef: z.string().min(1).max(100),
+  amountMinor: z.string().regex(/^\d+$/),
+  currency: z.string().length(3),
+  description: z.string().max(500).optional(),
+});
 const CreateRefund = z.object({ externalRef: z.string().min(1).max(100), amountMinor: z.string().regex(/^\d+$/) });
 
 function esc(s: string): string {
@@ -51,6 +58,66 @@ export class MockPspController {
     return this.psp.refund(merchantId, id, body);
   }
 
+  // --- TPE simulé ---
+  @Post('api/terminals')
+  async createTerminal(@Headers('authorization') auth: string, @Body(new ZodPipe(CreateTerminal)) body: z.infer<typeof CreateTerminal>) {
+    return this.psp.createTerminal(await this.psp.authenticate(auth), body.label);
+  }
+
+  @Get('api/terminals')
+  async listTerminals(@Headers('authorization') auth: string) {
+    return this.psp.listTerminals(await this.psp.authenticate(auth));
+  }
+
+  @Post('api/terminals/:id/payments')
+  async createTerminalPayment(@Headers('authorization') auth: string, @Param('id') id: string, @Body(new ZodPipe(CreateTerminalPayment)) body: z.infer<typeof CreateTerminalPayment>) {
+    return this.view(await this.psp.createTerminalPayment(await this.psp.authenticate(auth), id, body));
+  }
+
+  @Post('api/payments/:id/cancel')
+  async cancelTerminalPayment(@Headers('authorization') auth: string, @Param('id') id: string) {
+    return this.view(await this.psp.cancelTerminalPayment(await this.psp.authenticate(auth), id));
+  }
+
+  /** Écran du TPE simulé : le « terminal » sur lequel le client présenterait sa carte (aucune donnée de carte). */
+  @Get('terminal/:id')
+  async terminal(@Param('id') id: string, @Res() res: Response) {
+    const screen = await this.psp.terminalScreen(id);
+    if (!screen) {
+      res.status(404).send('Unknown terminal');
+      return;
+    }
+    const p = screen.payment;
+    const amount = p ? (isCurrency(p.currency) ? formatMinor(p.amount_minor, p.currency, 'fr-MA') : `${p.amount_minor} ${p.currency}`) : '';
+    const act = (action: CheckoutAction, label: string, style = '') =>
+      p ? `<form method="post" action="/mock-psp/checkout/${esc(p.id)}/${action}"><button style="${style}">${esc(label)}</button></form>` : '';
+    const resolve = (outcome: 'succeeded' | 'failed', label: string, style = '') =>
+      p ? `<form method="post" action="/mock-psp/simulate/payments/${esc(p.id)}/resolve/${outcome}?return=terminal"><button style="${style}">${esc(label)}</button></form>` : '';
+    let body: string;
+    if (!p) body = `<p class="idle">En attente d’un montant…</p>`;
+    else if (p.status === 'pending' || p.status === 'requires_action')
+      body = `<div class="amount">${esc(amount)}</div><p>${esc(p.description ?? '')}</p><p><strong>Présentez ou insérez la carte</strong></p>
+${act('succeed', 'Carte acceptée (code saisi sur le terminal)')}${act('pending', 'Autorisation différée (en attente)', 'background:#b54708')}${act('decline', 'Carte refusée', 'background:#b42318')}${act('cancel', 'Annulé sur le terminal', 'background:#667085')}`;
+    else if (p.status === 'processing')
+      body = `<div class="amount">${esc(amount)}</div><p><strong>Autorisation en cours…</strong></p>${resolve('succeeded', 'Simuler : autorisation accordée')}${resolve('failed', 'Simuler : autorisation refusée', 'background:#b42318')}`;
+    else body = `<div class="amount">${esc(amount)}</div><p class="done">${p.status === 'succeeded' ? '✓ PAIEMENT ACCEPTÉ' : p.status === 'failed' ? '✗ REFUSÉ' : 'ANNULÉ'}</p>`;
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    res.type('html').send(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="3"><title>TPE simulé — Sandbox</title>
+<style>body{font-family:system-ui,sans-serif;background:#1d2939;margin:0;padding:16px;color:#101828}
+.tpe{max-width:340px;margin:24px auto;background:#f2f4f7;border-radius:24px;padding:20px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.screen{background:#d1fadf;border-radius:10px;padding:16px;min-height:150px;text-align:center}
+.badge{display:inline-block;background:#fef0c7;color:#93370d;padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600}
+.amount{font-size:30px;font-weight:700;margin:8px 0}.idle{color:#475467;margin-top:48px}.done{font-size:18px;font-weight:700}
+button{width:100%;padding:11px;margin:5px 0;border:0;border-radius:8px;background:#027a48;color:#fff;font-size:14px;cursor:pointer}
+small{color:#667085}</style></head><body><div class="tpe">
+<span class="badge">TPE SIMULÉ — SANDBOX, AUCUN PAIEMENT RÉEL</span>
+<p><small>${esc(screen.terminal.label)} · ${esc(screen.terminal.id)}</small></p>
+<div class="screen">${body}</div>
+<p><small>Simulation d’un terminal certifié : aucune donnée de carte n’est saisie ni transmise à VITPAY.</small></p>
+</div></body></html>`);
+  }
+
   @Get('api/refunds/:id')
   async getRefund(@Headers('authorization') auth: string, @Param('id') id: string) {
     return this.psp.getRefund(await this.psp.authenticate(auth), id);
@@ -81,6 +148,7 @@ export class MockPspController {
     }
     const r = await this.psp.resolvePayment(id, outcome);
     if (ret === 'page') res.redirect(303, `/mock-psp/checkout/${encodeURIComponent(id)}`);
+    else if (ret === 'terminal') res.redirect(303, await this.psp.terminalUrlOfPayment(id));
     else res.json(r);
   }
 

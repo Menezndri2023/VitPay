@@ -29,6 +29,8 @@ import { LedgerService } from './modules/ledger/ledger.service';
 import { MockPspController } from './modules/mock-psp/mock-psp.controller';
 import { MockPspService } from './modules/mock-psp/mock-psp.service';
 import { SandboxToolsController } from './modules/mock-psp/sandbox-tools.controller';
+import { TerminalsController } from './modules/payments/terminals.controller';
+import { TerminalsService } from './modules/payments/terminals.service';
 import { NotificationsConsumer } from './modules/notifications/notifications.consumer';
 import { OrganizationsController } from './modules/organizations/organizations.controller';
 import { OrganizationsService } from './modules/organizations/organizations.service';
@@ -73,6 +75,7 @@ export class AppModule {
       OrgKybDocumentsController,
       AdminKybDocumentsController,
       DevelopersController,
+      TerminalsController,
     ];
     if (config.MOCK_PSP_ENABLED) controllers.push(MockPspController, SandboxToolsController);
 
@@ -102,6 +105,7 @@ export class AppModule {
         MockProvider,
         ProviderRegistry,
         MockPspService,
+        TerminalsService,
         OrganizationsService,
         PaymentsService,
         RefundsService,

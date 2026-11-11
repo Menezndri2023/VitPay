@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../../config';
 import { hmacSha256Hex, randomToken, sha256Hex } from '../../common/crypto';
 import { Errors } from '../../common/errors';
-import { Db, Tx } from '../../database/db.service';
+import { Db, isUniqueViolation, Tx } from '../../database/db.service';
 
 /**
  * PRESTATAIRE SIMULÉ — sandbox uniquement (interdit en production par la configuration).
@@ -189,6 +189,85 @@ export class MockPspService {
     });
     this.dispatch(hooks);
     return { status: updated.status };
+  }
+
+  // ───────────── TPE simulé (carte présente) ─────────────
+
+  terminalUrl(terminalId: string): string {
+    return `${this.config.PUBLIC_API_URL}/mock-psp/terminal/${terminalId}`;
+  }
+
+  async terminalUrlOfPayment(paymentId: string): Promise<string> {
+    const p = await this.db.system((tx) => tx.maybeOne<{ terminal_id: string | null }>('SELECT terminal_id FROM mock_psp.payments WHERE id = $1', [paymentId]));
+    return p?.terminal_id ? `/mock-psp/terminal/${encodeURIComponent(p.terminal_id)}` : `/mock-psp/checkout/${encodeURIComponent(paymentId)}`;
+  }
+
+  async createTerminal(merchantId: string, label: string): Promise<{ id: string; label: string; status: string }> {
+    this.assertEnabled();
+    return this.db.system((tx) =>
+      tx.one(`INSERT INTO mock_psp.terminals (id, merchant_id, label) VALUES ($1,$2,$3) RETURNING id, label, status`, [`tml_${randomToken(12)}`, merchantId, label.slice(0, 60)]),
+    );
+  }
+
+  async listTerminals(merchantId: string): Promise<{ id: string; label: string; status: string }[]> {
+    this.assertEnabled();
+    return this.db.system((tx) => tx.query(`SELECT id, label, status FROM mock_psp.terminals WHERE merchant_id = $1 ORDER BY created_at`, [merchantId]));
+  }
+
+  /** Envoie un montant au terminal (idempotent par référence externe ; un seul encaissement affiché à la fois). */
+  async createTerminalPayment(merchantId: string, terminalId: string, input: { externalRef: string; amountMinor: string; currency: string; description?: string }): Promise<MockPayment> {
+    this.assertEnabled();
+    try {
+      return await this.db.system(async (tx) => {
+        const t = await tx.maybeOne<{ status: string }>('SELECT status FROM mock_psp.terminals WHERE id = $1 AND merchant_id = $2', [terminalId, merchantId]);
+        if (!t) throw Errors.notFound('Terminal');
+        if (t.status !== 'online') throw Errors.invalidState('Terminal offline');
+        const existing = await tx.maybeOne<MockPayment>('SELECT * FROM mock_psp.payments WHERE merchant_id = $1 AND external_ref = $2', [merchantId, input.externalRef]);
+        if (existing) return existing;
+        const merchant = await tx.one<{ fee_bps: number }>('SELECT fee_bps FROM mock_psp.merchants WHERE id = $1', [merchantId]);
+        const amount = BigInt(input.amountMinor);
+        const fee = (amount * BigInt(merchant.fee_bps) + 5000n) / 10000n;
+        return tx.one<MockPayment>(
+          `INSERT INTO mock_psp.payments (id, merchant_id, external_ref, amount_minor, currency, description, return_url, status, fee_minor, terminal_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$9) RETURNING *`,
+          [`pay_${randomToken(12)}`, merchantId, input.externalRef, amount.toString(), input.currency, input.description ?? null, this.terminalUrl(terminalId), fee.toString(), terminalId],
+        );
+      });
+    } catch (e) {
+      if (isUniqueViolation(e, 'mock_terminal_one_active_uq')) throw Errors.conflict('terminal_busy', 'The terminal is already processing another payment');
+      throw e;
+    }
+  }
+
+  /** Annulation à distance d'un encaissement encore affiché sur le terminal. */
+  async cancelTerminalPayment(merchantId: string, paymentId: string): Promise<MockPayment> {
+    this.assertEnabled();
+    const hooks: Hook[] = [];
+    const p = await this.db.system(async (tx) => {
+      const cur = await tx.maybeOne<MockPayment>('SELECT * FROM mock_psp.payments WHERE id = $1 AND merchant_id = $2 FOR UPDATE', [paymentId, merchantId]);
+      if (!cur) throw Errors.notFound('Payment');
+      if (!['pending', 'requires_action'].includes(cur.status)) return cur;
+      const u = await tx.one<MockPayment>(`UPDATE mock_psp.payments SET status = 'cancelled', updated_at = now() WHERE id = $1 RETURNING *`, [paymentId]);
+      await this.queueWebhook(tx, hooks, merchantId, 'payment.updated', paymentId);
+      return u;
+    });
+    this.dispatch(hooks);
+    return p;
+  }
+
+  /** Écran du terminal : encaissement en cours (le plus récent), s'il y en a un. */
+  async terminalScreen(terminalId: string): Promise<{ terminal: { id: string; label: string }; payment: MockPayment | null } | null> {
+    this.assertEnabled();
+    return this.db.system(async (tx) => {
+      const terminal = await tx.maybeOne<{ id: string; label: string }>('SELECT id, label FROM mock_psp.terminals WHERE id = $1', [terminalId]);
+      if (!terminal) return null;
+      const payment = await tx.maybeOne<MockPayment>(
+        `SELECT * FROM mock_psp.payments WHERE terminal_id = $1 AND (status IN ('pending','requires_action','processing') OR updated_at > now() - interval '30 seconds')
+          ORDER BY created_at DESC LIMIT 1`,
+        [terminalId],
+      );
+      return { terminal, payment };
+    });
   }
 
   async refund(merchantId: string, paymentId: string, input: { externalRef: string; amountMinor: string }) {

@@ -27,3 +27,14 @@
 7. ☑ Rotation de la clé de chiffrement ; ☑ rotation des secrets de webhooks ; ☑ anti-rejeu TOTP ; ☑ limitation de débit partagée (PostgreSQL) ; ☑ vérification de l'e-mail à l'inscription.
 8. ☑ Relevés de commissions VITPAY (hors flux, pro forma) — format de facture définitif après E2.
 9. Infrastructure de déploiement (Terraform) selon le choix d'hébergement (CNDP).
+
+## Étape 2 du staging (11/11/2026)
+
+- ☑ CI verte (gitleaks, audit des dépendances) ; dépendances sans vulnérabilité connue.
+- ☑ `APP_ENV=staging`, seed sans mot de passe connu, pile `infra/staging` (Caddy, sslip.io), répétition locale validée.
+- ☑ Référence de commande, paiement en attente, historique des événements.
+- ☑ TPE : interface `TerminalProvider` + **TPE simulé** de bout en bout (caisse, écran du terminal, annulation, remboursement).
+- ☑ Journal d'audit : cloisonné (RLS) et alimenté uniquement par `audit_append`.
+- ☐ Déploiement sur le VPS (en attente de la commande du serveur).
+- ☐ Lier chaque chiffré à son contexte (données associées GCM, R5-9).
+- ☐ Adaptateur TPE réel : contrat, documentation officielle et certification du fournisseur requis.

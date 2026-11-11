@@ -60,9 +60,9 @@ Voir [`docs/STAGING.md`](docs/STAGING.md) : VPS + Docker Compose + Caddy (HTTPS 
 
 ```bash
 pnpm --filter @vitpay/money test     # 9 tests (dont tests de propriétés)
-pnpm --filter @vitpay/api test       # 105 tests (unitaires + intégration sur PostgreSQL réel)
+pnpm --filter @vitpay/api test       # 113 tests (unitaires + intégration sur PostgreSQL réel)
 ./scripts/smoke.sh                   # parcours complet via les apps démarrées (API)
-MAILPIT_URL=http://localhost:8025 pnpm --filter @vitpay/e2e test   # 10 tests navigateur (Playwright + Chrome)
+MAILPIT_URL=http://localhost:8025 pnpm --filter @vitpay/e2e test   # 11 tests navigateur (Playwright + Chrome)
 ```
 
 ## Documentation

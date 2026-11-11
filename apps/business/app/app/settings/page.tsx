@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Alert, api, ApiError, Button, Card, Field, formatMoney, MoneyView, Select, StatusBadge } from '@vitpay/ui';
 import { useOrg } from '../org-context';
+import type { Terminal } from '../types';
 
 interface OrgInfo {
   displayName: string;
@@ -147,6 +148,10 @@ export default function SettingsPage() {
           </table>
         </div>
         {can('members:manage') && <Invitations onChange={load} />}
+      </Card>
+
+      <Card title="Terminaux de paiement (TPE)">
+        <TerminalList canManage={can('pos:manage')} />
       </Card>
 
       <Card title="Points de vente">
@@ -333,6 +338,75 @@ function StatementList() {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function TerminalList({ canManage }: { canManage: boolean }) {
+  const { orgApi } = useOrg();
+  const [list, setList] = useState<Terminal[]>([]);
+  const [msg, setMsg] = useState<{ kind: 'success' | 'danger'; text: string } | null>(null);
+  const load = useCallback(() => orgApi<Terminal[]>('/terminals').then(setList).catch(() => setList([])), [orgApi]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const add = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    setMsg(null);
+    try {
+      await orgApi('/terminals/sandbox', { method: 'POST', body: { label: String(new FormData(form).get('label')) } });
+      form.reset();
+      setMsg({ kind: 'success', text: 'TPE simulé ajouté.' });
+      await load();
+    } catch (err) {
+      setMsg({ kind: 'danger', text: err instanceof ApiError ? err.message : 'Erreur' });
+    }
+  };
+  const disable = async (id: string) => {
+    await orgApi(`/terminals/${id}`, { method: 'DELETE' }).catch(() => undefined);
+    await load();
+  };
+  return (
+    <div className="vp-stack" style={{ gap: 8 }}>
+      <p className="vp-muted vp-small" style={{ margin: 0 }}>
+        Encaissement carte présente : la carte est lue par le terminal certifié, jamais par VITPAY. Aucun terminal réel n’est disponible à ce jour
+        (contrat et documentation du fournisseur requis) : seul un <strong>TPE simulé</strong> peut être ajouté en sandbox.
+      </p>
+      {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
+      {list.map((t) => (
+        <div key={t.id} className="vp-row vp-between" style={{ borderBottom: '1px solid var(--vp-border)', padding: '6px 0' }}>
+          <span>
+            {t.label} <span className="vp-mono vp-small vp-muted">{t.terminalRef}</span>
+            {t.simulatorUrl && t.status === 'active' && (
+              <>
+                {' · '}
+                <a href={t.simulatorUrl} target="_blank" rel="noreferrer" className="vp-small">
+                  écran du TPE simulé
+                </a>
+              </>
+            )}
+          </span>
+          <span className="vp-row" style={{ gap: 6 }}>
+            <StatusBadge status={t.status} />
+            {canManage && t.status === 'active' && (
+              <Button variant="ghost" onClick={() => disable(t.id)}>
+                Désactiver
+              </Button>
+            )}
+          </span>
+        </div>
+      ))}
+      {canManage && (
+        <form className="vp-row" style={{ alignItems: 'flex-end' }} onSubmit={add}>
+          <div style={{ flex: 1 }}>
+            <Field label="Nom du TPE simulé" name="label" required minLength={2} maxLength={60} placeholder="Caisse 1" />
+          </div>
+          <Button type="submit" variant="ghost">
+            Ajouter un TPE simulé
+          </Button>
+        </form>
+      )}
     </div>
   );
 }

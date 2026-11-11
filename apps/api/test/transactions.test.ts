@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { TERMINAL_PROVIDERS } from '../src/modules/providers/terminal.interface';
 import { connectMock, createRequest, idemKey, ownerQuery, payerActs, registerMerchant, resetDb, Session, startApp, TestCtx, tokenOf } from './helpers';
 
 describe('transactions : référence de commande, paiement en attente, historique', () => {
@@ -144,6 +143,24 @@ describe('transactions : référence de commande, paiement en attente, historiqu
     expect(mine.map((r) => r.org_id)).toEqual([orgId]);
     const verify = await ownerQuery<{ n: string }>(`SELECT count(*)::text AS n FROM audit_log`);
     expect(Number(verify[0]?.n)).toBeGreaterThan(10);
+    // [R7-9] Aucune insertion directe ; écriture pour une autre organisation refusée par la fonction
+    await expect(ctx.db.forOrg(orgId, (tx) => tx.query(`INSERT INTO audit_log (actor_type, action, hash) VALUES ('system','forged','\\x00')`))).rejects.toThrow(/permission denied/);
+    await expect(ctx.db.system((tx) => tx.query(`INSERT INTO audit_log (actor_type, action, hash) VALUES ('system','forged','\\x00')`))).rejects.toThrow(/permission denied/);
+    const other = await registerMerchant(ctx, 'audit-other@tx.test', 'Autre org audit');
+    await expect(
+      ctx.db.forOrg(orgId, (tx) => tx.query(`SELECT audit_append(now(),'user',NULL,$1,'forged',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'{}')`, [other.orgId])),
+    ).rejects.toThrow(/organization mismatch/);
+    // [R8-C1] Empreinte liée à la ligne : contenu canonique différent des colonnes, ou date antidatée → refusé
+    const now = new Date().toISOString();
+    const canon = (o: object) => JSON.stringify(o);
+    const base = { occurredAt: now, actorType: 'system', actorUserId: null, orgId: null, action: 'x', targetType: null, targetId: null, reason: null, before: null, after: null, metadata: null };
+    await expect(
+      ctx.db.system((tx) => tx.query(`SELECT audit_append($1,'system',NULL,NULL,'payment.refunded',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,$2)`, [now, canon(base)])),
+    ).rejects.toThrow(/does not match the row/);
+    const old = new Date(Date.now() - 3600_000).toISOString();
+    await expect(
+      ctx.db.system((tx) => tx.query(`SELECT audit_append($1,'system',NULL,NULL,'x',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,$2)`, [old, canon({ ...base, occurredAt: old })])),
+    ).rejects.toThrow(/current time/);
     const { AuditService } = await import('../src/modules/audit/audit.service');
     expect((await ctx.app.get(AuditService).verifyChain()).ok).toBe(true);
   });
@@ -161,7 +178,4 @@ describe('transactions : référence de commande, paiement en attente, historiqu
     expect((await s.post(`/v1/orgs/${orgId}/sandbox/attempts/${attemptId}/resolve`, { outcome: 'failed' })).status).toBe(409);
   });
 
-  it('TPE : interface préparée, aucune intégration déclarée', () => {
-    expect(TERMINAL_PROVIDERS).toHaveLength(0);
-  });
 });

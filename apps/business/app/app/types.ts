@@ -18,6 +18,7 @@ export interface PaymentRequest {
 
 export interface Attempt {
   id: string;
+  terminalId?: string | null;
   providerCode: string;
   providerRef: string | null;
   method: string;
@@ -51,6 +52,16 @@ export interface RequestEvent {
   reason: string | null;
 }
 
+export interface Terminal {
+  id: string;
+  label: string;
+  providerCode: string;
+  terminalRef: string;
+  posId: string | null;
+  status: 'active' | 'disabled';
+  simulatorUrl: string | null;
+}
+
 /** Libellés de l'historique des événements. */
 export const EVENT_LABELS: Record<string, string> = {
   'payment_request.created': 'Demande créée',
@@ -58,6 +69,7 @@ export const EVENT_LABELS: Record<string, string> = {
   'payment_request.expired': 'Demande expirée',
   'payment_attempt.created': 'Tentative de paiement ouverte',
   'payment_attempt.status_changed': 'Statut de la tentative',
+  'payment_attempt.cancel_requested': 'Annulation demandée au terminal',
   'refund.requested': 'Remboursement demandé',
   'refund.status_changed': 'Statut du remboursement',
   'dispute.opened': 'Litige ouvert',

@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react';
 import { Alert, ApiError, Button, formatMoney, newIdempotencyKey } from '@vitpay/ui';
 import { useOrg } from '../org-context';
-import { RequestDetail } from '../types';
+import { RequestDetail, Terminal } from '../types';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', '⌫'];
 
 /**
- * Module TPE (MVP) : encaissement physique par QR dynamique.
- * Le caissier saisit le montant, le client scanne et paie sur son téléphone.
- * Aucune lecture de carte ni saisie de PIN (hors périmètre sans certification).
+ * Caisse : encaissement physique par QR dynamique (le client paie sur son téléphone) ou sur un
+ * terminal de paiement (TPE, carte présente). VITPAY ne lit jamais la carte : le terminal certifié
+ * s'en charge. Seul terminal disponible à ce jour : le TPE SIMULÉ (sandbox).
  */
 export default function PosPage() {
   const { orgApi, orgId } = useOrg();
@@ -19,12 +19,21 @@ export default function PosPage() {
   const [amount, setAmount] = useState('');
   const [current, setCurrent] = useState<RequestDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [terminalId, setTerminalId] = useState('');
 
   useEffect(() => {
     orgApi<{ id: string; name: string }[]>('/points-of-sale').then((p) => {
       setPos(p);
       setPosId(p[0]?.id ?? '');
     });
+    orgApi<Terminal[]>('/terminals')
+      .then((t) => {
+        const active = t.filter((x) => x.status === 'active');
+        setTerminals(active);
+        setTerminalId(active[0]?.id ?? '');
+      })
+      .catch(() => setTerminals([]));
   }, [orgApi]);
 
   useEffect(() => {
@@ -58,6 +67,31 @@ export default function PosPage() {
     }
   };
 
+  const refresh = async () => {
+    if (current) setCurrent(await orgApi<RequestDetail>(`/payment-requests/${current.id}`));
+  };
+
+  const sendToTerminal = async () => {
+    if (!current) return;
+    setError(null);
+    try {
+      await orgApi(`/payment-requests/${current.id}/terminal-payment`, { method: 'POST', body: { terminalId } });
+    } catch (e) {
+      setError(e instanceof ApiError ? (e.code === 'terminal_busy' ? 'Le TPE affiche déjà un autre encaissement.' : e.message) : 'Erreur');
+    }
+    await refresh();
+  };
+
+  const cancelOnTerminal = async (attemptId: string) => {
+    setError(null);
+    try {
+      await orgApi(`/terminal-payments/${attemptId}/cancel`, { method: 'POST' });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Erreur');
+    }
+    await refresh();
+  };
+
   const reset = () => {
     setCurrent(null);
     setAmount('');
@@ -87,6 +121,43 @@ export default function PosPage() {
             <img src={`/api/v1/orgs/${orgId}/payment-requests/${current.id}/qr.svg`} alt="QR code à scanner par le client" style={{ width: '100%', maxWidth: 340, margin: '0 auto', background: '#fff', borderRadius: 12, padding: 10 }} />
             <p className="vp-muted">Le client scanne ce QR code avec son téléphone pour payer.</p>
             <Alert kind="info">En attente de la confirmation du prestataire…</Alert>
+            {(() => {
+              const onTerminal = current.attempts.find((a) => a.terminalId && ['created', 'pending', 'requires_action', 'processing'].includes(a.status));
+              const t = terminals.find((x) => x.id === (onTerminal?.terminalId ?? terminalId));
+              if (onTerminal)
+                return (
+                  <div className="vp-card vp-stack" style={{ gap: 8 }}>
+                    <strong>Montant envoyé au TPE « {t?.label ?? 'terminal'} »</strong>
+                    <span className="vp-muted vp-small">{onTerminal.status === 'processing' ? 'Autorisation en cours…' : 'Le client présente ou insère sa carte sur le terminal.'}</span>
+                    {t?.simulatorUrl && (
+                      <a href={t.simulatorUrl} target="_blank" rel="noreferrer" className="vp-small">
+                        Ouvrir le TPE simulé (sandbox)
+                      </a>
+                    )}
+                    {onTerminal.status !== 'processing' && (
+                      <Button variant="ghost" onClick={() => cancelOnTerminal(onTerminal.id)}>
+                        Annuler sur le TPE
+                      </Button>
+                    )}
+                  </div>
+                );
+              if (!terminals.length) return null;
+              return (
+                <div className="vp-card vp-stack" style={{ gap: 8 }}>
+                  <strong>Ou encaisser par carte sur un TPE</strong>
+                  {terminals.length > 1 && (
+                    <select className="vp-input" aria-label="Terminal" value={terminalId} onChange={(e) => setTerminalId(e.target.value)}>
+                      {terminals.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <Button onClick={sendToTerminal}>Envoyer au TPE{terminals.length === 1 ? ` « ${terminals[0]?.label} »` : ''}</Button>
+                </div>
+              );
+            })()}
             {error && <Alert kind="danger">{error}</Alert>}
             <Button variant="ghost" onClick={abandon}>
               Abandonner

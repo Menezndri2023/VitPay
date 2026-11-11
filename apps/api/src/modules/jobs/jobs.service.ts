@@ -3,6 +3,7 @@ import { APP_CONFIG, AppConfig } from '../../config';
 import { PaymentsService } from '../payments/payments.service';
 import { DevelopersService } from '../developers/developers.service';
 import { Db } from '../../database/db.service';
+import { TerminalsService } from '../payments/terminals.service';
 import { AccountCleanupService } from '../identity/account-cleanup.service';
 import { EmailService } from '../email/email.service';
 import { OutboxService } from '../platform/outbox.service';
@@ -27,6 +28,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly developers: DevelopersService,
     private readonly cleanup: AccountCleanupService,
     private readonly db: Db,
+    private readonly terminals: TerminalsService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -37,6 +39,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.every('sync-stale-attempts', 60_000, () => this.payments.syncStaleAttempts());
     this.every('send-emails', 5_000, () => this.email.processQueue());
     this.every('deliver-webhooks', 3_000, () => this.developers.deliverDue());
+    this.every('recover-terminal-attempts', 30_000, () => this.terminals.recoverPending());
     this.every('purge-rate-limits', 60_000, () => this.purgeRateLimits());
     this.every('release-unverified-accounts', 3_600_000, () => this.cleanup.releaseUnverified());
     this.logger.log('background jobs started');

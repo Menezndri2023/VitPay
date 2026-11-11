@@ -1,10 +1,18 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { MERCHANT_STATE } from '../global-setup';
 
 const BIZ = process.env.BIZ_URL ?? 'http://localhost:3711';
 const PAY = process.env.PAY_URL ?? 'http://localhost:3710';
 const ADMIN = process.env.ADMIN_URL ?? 'http://localhost:3712';
 const SHOTS = process.env.PW_SHOTS;
 const MAILPIT = process.env.MAILPIT_URL;
+
+/** Réutilise la session du commerçant ouverte une fois par global-setup.ts (limitation de débit). */
+async function useMerchantSession(page: import('@playwright/test').Page): Promise<void> {
+  const state = JSON.parse(readFileSync(MERCHANT_STATE, 'utf8')) as { cookies: Parameters<import('@playwright/test').BrowserContext['addCookies']>[0] };
+  await page.context().addCookies(state.cookies);
+}
 
 /** Dernier lien correspondant dans les e-mails reçus par Mailpit (envoyés par le worker via SMTP). */
 async function mailLink(request: import('@playwright/test').APIRequestContext, to: string, re: RegExp): Promise<string> {
@@ -106,7 +114,7 @@ test('parcours complet : inscription → vérification e-mail → prestataire �
 test('page de paiement en arabe : sens de lecture RTL', async ({ page }) => {
   // Demande existante créée via l'API du compte de démonstration
   const api = page.request;
-  await api.post(`${BIZ}/api/v1/auth/login`, { data: { email: 'marchand@vitpay.test', password: 'Demo-Password-2026!' }, headers: { 'x-vitpay-csrf': '1' } });
+  await useMerchantSession(page);
   const me = await (await api.get(`${BIZ}/api/v1/auth/me`)).json();
   const res = await api.post(`${BIZ}/api/v1/orgs/${me.organizations[0].id}/payment-requests`, {
     data: { amount: '99', currency: 'MAD', description: 'Test RTL' },
@@ -123,11 +131,7 @@ test('page de paiement en arabe : sens de lecture RTL', async ({ page }) => {
 });
 
 test('caisse : saisie au pavé et QR plein écran', async ({ page }) => {
-  await page.goto(`${BIZ}/login`);
-  await page.getByLabel('E-mail').fill('marchand@vitpay.test');
-  await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.waitForURL(/\/app/);
+  await useMerchantSession(page);
   await page.goto(`${BIZ}/app/pos`);
   for (const k of ['4', '5', ',', '5']) await page.getByRole('button', { name: k, exact: true }).click();
   await shot(page, '10-pos-keypad');
@@ -181,11 +185,7 @@ test('mot de passe oublié : e-mail réel (SMTP → Mailpit) puis réinitialisat
 });
 
 test('KYB : dépôt d’un justificatif depuis les paramètres', async ({ page }) => {
-  await page.goto(`${BIZ}/login`);
-  await page.getByLabel('E-mail').fill('marchand@vitpay.test');
-  await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.waitForURL(/\/app/);
+  await useMerchantSession(page);
   await page.goto(`${BIZ}/app/settings`);
   await page.getByLabel('Type de document').selectOption('ice_certificate');
   await page.getByLabel('Fichier').setInputFiles({ name: 'attestation-ice.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF\n') });
@@ -196,11 +196,7 @@ test('KYB : dépôt d’un justificatif depuis les paramètres', async ({ page }
 });
 
 test('développeurs : création d’une clé API puis appel de l’API avec cette clé', async ({ page, request }) => {
-  await page.goto(`${BIZ}/login`);
-  await page.getByLabel('E-mail').fill('marchand@vitpay.test');
-  await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.waitForURL(/\/app/);
+  await useMerchantSession(page);
   await page.goto(`${BIZ}/app/developers`);
   await page.getByLabel('Nom de la clé').fill(`E2E ${Date.now()}`);
   await page.getByRole('button', { name: 'Créer une clé' }).click();
@@ -230,11 +226,7 @@ test('connexion : le paramètre next ne peut pas rediriger hors du site', async 
 
 test('paiement en attente : référence de commande, confirmation différée simulée, historique des événements', async ({ page, context }) => {
   const ref = `CMD-E2E-${Date.now()}`;
-  await page.goto(`${BIZ}/login`);
-  await page.getByLabel('E-mail').fill('marchand@vitpay.test');
-  await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.waitForURL(/\/app/);
+  await useMerchantSession(page);
   await page.goto(`${BIZ}/app/requests/new`);
   await page.getByLabel('Montant (MAD)').fill('77');
   await page.getByLabel('Référence de commande (facultatif, unique)').fill(ref);
@@ -265,4 +257,39 @@ test('paiement en attente : référence de commande, confirmation différée sim
   // Le payeur voit la confirmation (preuve serveur)
   await expect(p.getByText('Paiement confirmé')).toBeVisible({ timeout: 20_000 });
   await payer.close();
+});
+
+test('TPE simulé : encaissement carte présente depuis la caisse', async ({ page, context }) => {
+  const label = `TPE E2E ${Date.now() % 100000}`;
+  await useMerchantSession(page);
+
+  // Ajout d'un TPE simulé
+  await page.goto(`${BIZ}/app/settings`);
+  await page.getByLabel('Nom du TPE simulé').fill(label);
+  await page.getByRole('button', { name: 'Ajouter un TPE simulé' }).click();
+  await expect(page.getByText('TPE simulé ajouté.')).toBeVisible();
+
+  // Caisse : montant, puis envoi au TPE
+  await page.goto(`${BIZ}/app/pos`);
+  for (const k of ['3', '2']) await page.getByRole('button', { name: k, exact: true }).click();
+  await page.getByRole('button', { name: 'Générer le QR d’encaissement' }).click();
+  const select = page.getByLabel('Terminal');
+  if (await select.count()) await select.selectOption({ label });
+  await page.getByRole('button', { name: /Envoyer au TPE/ }).click();
+  await expect(page.getByText(/Montant envoyé au TPE/)).toBeVisible();
+  const simUrl = await page.getByRole('link', { name: 'Ouvrir le TPE simulé (sandbox)' }).getAttribute('href');
+  await shot(page, '18-pos-terminal');
+
+  // Le client présente sa carte sur le terminal (simulé)
+  const tpe = await context.newPage();
+  await tpe.goto(simUrl as string);
+  await expect(tpe.getByText('TPE SIMULÉ — SANDBOX, AUCUN PAIEMENT RÉEL')).toBeVisible();
+  await expect(tpe.locator('.amount')).toContainText('32');
+  await shot(tpe, '19-terminal-screen');
+  await tpe.getByRole('button', { name: 'Carte acceptée (code saisi sur le terminal)' }).click();
+  await expect(tpe.getByText('✓ PAIEMENT ACCEPTÉ')).toBeVisible();
+  await tpe.close();
+
+  // Confirmation en caisse (preuve serveur)
+  await expect(page.getByText('Paiement confirmé')).toBeVisible({ timeout: 20_000 });
 });

@@ -7,7 +7,7 @@
 | Besoin futur | Contrat dans le code | État |
 |---|---|---|
 | Paiement en ligne (page hébergée par un prestataire agréé) | [`PaymentProvider`](../apps/api/src/modules/providers/provider.interface.ts) | Implémenté par le **prestataire simulé** uniquement |
-| Terminal de paiement (TPE, carte présente) | [`TerminalProvider`](../apps/api/src/modules/providers/terminal.interface.ts) | Interface seule, registre vide |
+| Terminal de paiement (TPE, carte présente) | [`TerminalProvider`](../apps/api/src/modules/providers/terminal.interface.ts) | Implémenté par le **TPE simulé** uniquement (sandbox) |
 | Notifications du prestataire | `verifyWebhook` + relecture serveur (`getPayment`) | Prêt (signature, déduplication, rejeu sans effet) |
 | Rapprochement | `getSettlementReport` + module de rapprochement | Prêt (net = brut − frais, écarts en incident) |
 | Remboursements, litiges | `refund`, `getRefund`, `getDispute` | Prêts (plafonds, machines à états) |
@@ -30,6 +30,20 @@ Toute intégration réelle hérite automatiquement des protections du cœur : id
 - Identifiants du commerçant chiffrés (AES-256-GCM, rotation de clé) ; jamais de secret dans le dépôt.
 - Tests de contrat contre la sandbox du prestataire, puis revue indépendante, avant toute activation.
 
-## 4. Prestataire simulé (sandbox et staging)
+## 4. Parcours TPE (carte présente)
+
+```
+Caisse VITPAY ──(montant, tentative card_present)──▶ fournisseur ──▶ TPE certifié (lecture carte, PIN)
+      ▲                                                   │
+      └── notification signée ──▶ relecture serveur (getTerminalPayment) ──▶ confirmation, ledger, reçu
+```
+
+- Le caissier saisit le montant, puis « Envoyer au TPE ». Le terminal affiche le montant ; le client présente sa carte **sur le terminal**.
+- VITPAY ne reçoit que le résultat (statut, montant, frais, éventuellement 4 derniers chiffres et code d'autorisation) — jamais PAN, piste ni PIN.
+- Garanties identiques au paiement en ligne : une tentative active par demande, un encaissement à la fois par terminal (`terminal_busy`), annulation à distance, confirmation uniquement par relecture serveur, remboursement, rapprochement, audit.
+- Un terminal relève du mode de son compte prestataire : un TPE simulé ne peut encaisser qu'une demande sandbox.
+- **Sandbox** : Paramètres → Terminaux → « Ajouter un TPE simulé ». L'écran du TPE simulé permet : carte acceptée, autorisation différée puis accordée ou refusée, carte refusée, annulation sur le terminal.
+
+## 5. Prestataire simulé (sandbox et staging)
 
 Scénarios disponibles sur la page de paiement simulée : succès, 3-D Secure, **confirmation différée (en attente)** puis confirmation ou refus de la banque, carte refusée, abandon. Remboursements partiels ou totaux, litiges (ouverts, gagnés, perdus), rapports de règlement. Tout est marqué « SANDBOX — AUCUN PAIEMENT RÉEL ».
