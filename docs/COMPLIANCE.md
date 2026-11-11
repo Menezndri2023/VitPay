@@ -65,7 +65,8 @@ Chaque ligne doit recevoir une **réponse écrite** (avocat, Bank Al-Maghrib, CN
 | # | Point | Statut |
 |---|---|---|
 | D1 | En modèle A, VITPAY est-il **assujetti** ? Sinon, quelles obligations contractuelles vis-à-vis du prestataire (remontée d'alertes) ? | ☐ |
-| D2 | Niveau de KYB exigé avant d'activer un commerçant en live (aujourd'hui : raison sociale, ICE, RC, adresse ; documents à ajouter) | ☐ |
+| D2 | Niveau de KYB exigé avant d'activer un commerçant en live. Aujourd'hui : raison sociale, ICE, RC, adresse et **justificatifs chiffrés** (extrait RC, attestation ICE, pièce d'identité du dirigeant, statuts, RIB) examinés par la conformité. Liste minimale à valider | ☐ |
+| D2b | Durée de conservation des justificatifs KYB après fin de relation (aujourd'hui : conservation illimitée, purge à implémenter) | ☐ |
 | D3 | Filtrage des sanctions : outil, listes, fréquence | ☐ |
 | D4 | Plafonds par demande et par jour, et règles de détection (à paramétrer avec le prestataire) | ☐ |
 

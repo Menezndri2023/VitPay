@@ -167,7 +167,7 @@ export class OrganizationsService {
             orgId,
             provider.code,
             input.mode,
-            input.label ?? `${provider.displayName} (${input.mode})`,
+            input.label ?? provider.displayName,
             encrypt(JSON.stringify(credentials), this.config.encryptionKey),
             encrypt(webhookSecret as string, this.config.encryptionKey),
           ],

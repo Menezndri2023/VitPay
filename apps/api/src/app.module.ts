@@ -11,6 +11,8 @@ import { EmailService } from './modules/email/email.service';
 import { PasswordResetService } from './modules/identity/password-reset.service';
 import { OrgInvitationsController, PublicInvitationsController } from './modules/organizations/invitations.controller';
 import { InvitationsService } from './modules/organizations/invitations.service';
+import { AdminKybDocumentsController, OrgKybDocumentsController } from './modules/organizations/kyb-documents.controller';
+import { KybDocumentsService } from './modules/organizations/kyb-documents.service';
 import { AdminBillingController, OrgBillingController } from './modules/billing/billing.controller';
 import { BillingService } from './modules/billing/billing.service';
 import { AdminAuthController, AuthController } from './modules/identity/auth.controller';
@@ -60,6 +62,8 @@ export class AppModule {
       OrgBillingController,
       OrgInvitationsController,
       PublicInvitationsController,
+      OrgKybDocumentsController,
+      AdminKybDocumentsController,
     ];
     if (config.MOCK_PSP_ENABLED) controllers.push(MockPspController);
 
@@ -95,6 +99,7 @@ export class AppModule {
         EmailService,
         PasswordResetService,
         InvitationsService,
+        KybDocumentsService,
         JobsService,
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: SecurityGuard },

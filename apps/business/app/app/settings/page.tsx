@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Alert, ApiError, Button, Card, Field, formatMoney, MoneyView, Select, StatusBadge } from '@vitpay/ui';
+import { Alert, api, ApiError, Button, Card, Field, formatMoney, MoneyView, Select, StatusBadge } from '@vitpay/ui';
 import { useOrg } from '../org-context';
 
 interface OrgInfo {
@@ -117,13 +117,18 @@ export default function SettingsPage() {
             <Field label="ICE (15 chiffres)" name="ice" defaultValue={org.ice ?? ''} required pattern="\d{15}" />
             <Field label="Registre du commerce (RC)" name="rc" defaultValue={org.rc ?? ''} required />
             <Field label="Adresse du siège" name="address" defaultValue={org.address ?? ''} required />
-            <p className="vp-muted vp-small" style={{ margin: 0 }}>Le téléversement des justificatifs sera ajouté avec le stockage documentaire sécurisé.</p>
             <Button type="submit">Soumettre</Button>
           </form>
         ) : (
           <p className="vp-muted">Seul un administrateur peut soumettre ces informations.</p>
         )}
       </Card>
+
+      {can('org:update') && (
+        <Card title="Justificatifs KYB">
+          <KybDocuments />
+        </Card>
+      )}
 
       <Card title="Équipe">
         <div className="vp-table-wrap">
@@ -213,6 +218,80 @@ function Invitations({ onChange }: { onChange: () => Promise<void> }) {
         </div>
         <Button type="submit" variant="ghost">
           Inviter
+        </Button>
+      </form>
+      {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
+    </div>
+  );
+}
+
+const KYB_KIND_LABEL: Record<string, string> = {
+  rc_extract: 'Extrait du registre du commerce',
+  ice_certificate: 'Attestation ICE',
+  id_document: 'Pièce d’identité du dirigeant',
+  statutes: 'Statuts',
+  bank_details: 'RIB',
+  other: 'Autre',
+};
+
+function KybDocuments() {
+  const { orgId } = useOrg();
+  const [docs, setDocs] = useState<{ id: string; kind: string; filename: string; status: string; reviewNote: string | null; createdAt: string }[]>([]);
+  const [msg, setMsg] = useState<{ kind: 'success' | 'danger'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => api<typeof docs>(`/v1/orgs/${orgId}/kyb/documents`).then(setDocs), [orgId]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return (
+    <div className="vp-stack">
+      <p className="vp-muted vp-small" style={{ margin: 0 }}>
+        PDF, PNG ou JPEG, 5 Mo maximum. Les documents sont chiffrés et ne sont consultables que par votre organisation et l’équipe conformité VITPAY (chaque consultation est journalisée).
+      </p>
+      {docs.map((d) => (
+        <div key={d.id} className="vp-row vp-between vp-small">
+          <span>
+            <a href={`/api/v1/orgs/${orgId}/kyb/documents/${d.id}/download`}>{d.filename}</a> <span className="vp-muted">— {KYB_KIND_LABEL[d.kind] ?? d.kind}</span>
+            {d.reviewNote && <div className="vp-muted">{d.reviewNote}</div>}
+          </span>
+          <StatusBadge status={d.status === 'accepted' ? 'verified' : d.status === 'rejected' ? 'rejected' : 'pending'} label={d.status === 'accepted' ? 'accepté' : d.status === 'rejected' ? 'refusé' : 'en examen'} />
+        </div>
+      ))}
+      <form
+        className="vp-row"
+        style={{ alignItems: 'flex-end' }}
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const formEl = e.currentTarget;
+          setBusy(true);
+          setMsg(null);
+          try {
+            const res = await fetch(`/api/v1/orgs/${orgId}/kyb/documents`, { method: 'POST', body: new FormData(formEl), headers: { 'x-vitpay-csrf': '1' }, credentials: 'same-origin' });
+            if (!res.ok) throw new Error(res.status === 422 ? 'Fichier refusé : PDF, PNG ou JPEG uniquement.' : res.status === 413 ? 'Fichier trop volumineux (5 Mo maximum).' : 'Envoi impossible.');
+            formEl.reset();
+            setMsg({ kind: 'success', text: 'Document envoyé.' });
+            await load();
+          } catch (err) {
+            setMsg({ kind: 'danger', text: (err as Error).message });
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <div style={{ width: 240 }}>
+          <Select label="Type de document" name="kind" defaultValue="rc_extract">
+            {Object.entries(KYB_KIND_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <Field label="Fichier" name="file" type="file" accept="application/pdf,image/png,image/jpeg" required />
+        </div>
+        <Button type="submit" variant="ghost" disabled={busy}>
+          Envoyer
         </Button>
       </form>
       {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}

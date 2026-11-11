@@ -26,6 +26,7 @@
 | GET / POST / DELETE | `/members`, `/members/:userId` | (`members:manage`) |
 | GET / POST | `/points-of-sale` | (`pos:manage`) |
 | GET / POST / DELETE | `/invitations`, `/invitations/:id` | Invitations par e-mail (`members:manage`) |
+| GET / POST | `/kyb/documents` (multipart `file` + `kind`), GET `/kyb/documents/:id/download` | Justificatifs KYB chiffrés, PDF/PNG/JPEG ≤ 5 Mo (`org:update`) |
 | GET / POST / DELETE | `/providers`, `/providers/:accountId` | Comptes prestataires (`providers:manage`) |
 | POST 🔑 | `/payment-requests` | `{amount:"500.00", currency, description?, customerName?, customerContact?, expiresInHours?, posId?}` |
 | GET | `/payment-requests?status=&q=&before=&limit=&posId=` | Pagination par curseur (`nextCursor`) |
@@ -56,7 +57,7 @@
 `POST /webhooks/providers/:providerCode/:accountId` : un endpoint par compte marchand (modèle A). Réponses : 200 `{status: accepted|duplicate}`, 400 si la signature est invalide.
 
 ## Admin — `/v1/admin` (audience admin + MFA)
-`GET dashboard` · `GET organizations[?q&status]` · `GET organizations/:id` · `POST organizations/:id/suspend {reason}` · `POST organizations/:id/kyb {decision, reason}` · `POST approvals {action, targetId, payload, reason}` · `GET approvals` · `POST approvals/:id/decision {decision, note}` · `GET payments[?q&status&orgId]` · `GET audit[?orgId&action&before]` · `GET audit/verify` · `GET incidents` · `POST incidents/:id/resolve {note}` · `GET webhooks` · `POST webhooks/:id/replay` · `GET provider-accounts` · `GET|POST reconciliation/runs {providerAccountId, date}` · `GET|POST billing/statements {periodStart, periodEnd, mode, orgId?}` · `POST billing/statements/:id/paid {reference}` · `POST billing/statements/:id/void {reason}`.
+`GET dashboard` · `GET organizations[?q&status]` · `GET organizations/:id` · `POST organizations/:id/suspend {reason}` · `POST organizations/:id/kyb {decision, reason}` · `POST approvals {action, targetId, payload, reason}` · `GET approvals` · `POST approvals/:id/decision {decision, note}` · `GET payments[?q&status&orgId]` · `GET audit[?orgId&action&before]` · `GET audit/verify` · `GET incidents` · `POST incidents/:id/resolve {note}` · `GET webhooks` · `POST webhooks/:id/replay` · `GET provider-accounts` · `GET|POST reconciliation/runs {providerAccountId, date}` · `GET|POST billing/statements {periodStart, periodEnd, mode, orgId?}` · `POST billing/statements/:id/paid {reference}` · `POST billing/statements/:id/void {reason}` · `GET organizations/:orgId/kyb/documents` · `GET kyb/documents/:id/download` (journalisé) · `POST kyb/documents/:id/review {decision, note}`.
 
 ## Prestataire simulé (sandbox uniquement) — `/mock-psp`
 `POST api/merchants` · `POST api/payments` · `GET api/payments/:id` · `POST api/payments/:id/refunds` · `GET api/refunds/:id` · `GET api/disputes/:id` · `GET api/settlements?date=` · `GET checkout/:id` · `POST checkout/:id/{succeed|decline|challenge|cancel}` · `POST simulate/payments/:id/dispute` · `POST simulate/disputes/:id/{won|lost}`.

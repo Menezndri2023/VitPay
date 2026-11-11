@@ -8,6 +8,7 @@
 | Force brute | Verrouillage 15 min après 5 échecs ; limitation de débit par route (`@nestjs/throttler`) | `security.test.ts` |
 | Récupération de compte | Mot de passe oublié : réponse identique (pas d'énumération), jeton de 256 bits haché, 30 min, usage unique ; toutes les sessions révoquées ; comptes admin exclus (réinitialisation par un Super Admin) | `accounts.test.ts`, e2e |
 | E-mails | File asynchrone avec reprise ; corps (liens à jeton) **purgé après envoi** ; adresses masquées dans les journaux | `accounts.test.ts` |
+| Justificatifs KYB | Chiffrés AES-256-GCM au repos + empreinte SHA-256 vérifiée à la lecture ; type réel détecté par signature (PDF/PNG/JPEG), taille ≤ 5 Mo, nom de fichier assaini ; non modifiables par le commerçant ; consultation conformité **journalisée** | `admin.test.ts`, e2e |
 | Invitations | Jeton à usage unique (7 j), acceptation réservée à l'e-mail invité ; redirections `next` limitées aux chemins internes | `accounts.test.ts` |
 | Sessions | Jeton opaque de 256 bits, **seul le hash SHA-256 est stocké**, expiration 12 h (Business) / 4 h (Admin), révocation à la déconnexion | |
 | MFA | TOTP ; **obligatoire pour l'admin** (enrôlement forcé), secret chiffré AES-256-GCM | `admin.test.ts` |

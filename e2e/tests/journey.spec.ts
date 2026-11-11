@@ -157,3 +157,18 @@ test('mot de passe oublié : e-mail réel (SMTP → Mailpit) puis réinitialisat
   await expect(page.getByText(/Mot de passe modifié/)).toBeVisible();
   await shot(page, '13-reset-done');
 });
+
+test('KYB : dépôt d’un justificatif depuis les paramètres', async ({ page }) => {
+  await page.goto(`${BIZ}/login`);
+  await page.getByLabel('E-mail').fill('marchand@vitpay.test');
+  await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
+  await page.getByRole('button', { name: 'Se connecter' }).click();
+  await page.waitForURL(/\/app/);
+  await page.goto(`${BIZ}/app/settings`);
+  await page.getByLabel('Type de document').selectOption('ice_certificate');
+  await page.getByLabel('Fichier').setInputFiles({ name: 'attestation-ice.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF\n') });
+  await page.getByRole('button', { name: 'Envoyer' }).click();
+  await expect(page.getByText('Document envoyé.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'attestation-ice.pdf' }).first()).toBeVisible();
+  await shot(page, '14-kyb-upload');
+});

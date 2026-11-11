@@ -17,7 +17,7 @@
 
 1. Appels d'offres prestataires (CMI, NAPS, Payzone, établissement de paiement) et obtention d'une sandbox. **Chemin critique.**
 2. Adaptateur du prestataire n°1 et tests de contrat.
-3. Stockage chiffré des documents KYB ; ☑ invitations d'équipe par e-mail ; ☑ mot de passe oublié.
+3. ☑ Stockage chiffré des justificatifs KYB ; ☑ invitations d'équipe par e-mail ; ☑ mot de passe oublié.
 4. ☑ Canal e-mail (SMTP, file + reprise ; fournisseur de production à choisir) ; SMS (fournisseur à choisir) ; WhatsApp Business API (à étudier).
 4b. ☑ Images Docker (API, worker, apps) et pile sandbox conteneurisée.
 5. Observabilité : Sentry, OpenTelemetry, alertes sur les incidents critiques.

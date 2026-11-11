@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuthService } from '../src/modules/identity/auth.service';
-import { adminSession, registerEnrollmentToken, connectMock, createRequest, login, PASSWORD, payerActs, registerMerchant, resetDb, startApp, TestCtx, tokenOf } from './helpers';
+import { adminSession, registerEnrollmentToken, connectMock, createRequest, login, ownerQuery, PASSWORD, payerActs, registerMerchant, resetDb, startApp, TestCtx, tokenOf } from './helpers';
 
 describe('VITPAY ADMIN', () => {
   let ctx: TestCtx;
@@ -181,5 +181,53 @@ describe('relevés de commissions (facturation hors flux)', () => {
     expect(again.body.issued[0].fees.minor).toBe('700');
     expect((await fin.post(`/v1/admin/billing/statements/${again.body.issued[0].id}/paid`, { reference: 'VIR-2026-0001' })).status).toBe(200);
     expect((await fin.post(`/v1/admin/billing/statements/${again.body.issued[0].id}/void`, { reason: 'Trop tard' })).status).toBe(409);
+  });
+});
+
+describe('justificatifs KYB chiffrés', () => {
+  let ctx: TestCtx;
+  beforeAll(async () => {
+    ctx = await startApp();
+  });
+  afterAll(async () => ctx.close());
+
+  const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+
+  it('dépôt validé par le contenu, chiffré en base, consultation admin journalisée', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'kybdocs@admin.test', 'Org Docs');
+    const up = (buf: Buffer, name: string, kind = 'rc_extract') =>
+      ctx.api().post(`/v1/orgs/${orgId}/kyb/documents`).set('Cookie', s.cookie).set('x-vitpay-csrf', '1').field('kind', kind).attach('file', buf, name);
+
+    // Un exécutable renommé en .pdf est refusé (type réel vérifié)
+    expect((await up(Buffer.from('MZ\x90\x00 fake exe'), 'extrait.pdf')).status).toBe(422);
+    expect((await up(PDF, 'x.pdf', 'passport_photo')).status).toBe(422);
+    const ok = await up(PDF, '../../etc/Extrait RC.pdf');
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({ kind: 'rc_extract', mimeType: 'application/pdf', filename: 'Extrait RC.pdf', status: 'pending' });
+
+    // Chiffré au repos : le contenu en clair n'apparaît pas en base
+    const raw = await ownerQuery<{ content_enc: Buffer }>(`SELECT content_enc FROM kyb_documents WHERE id = $1`, [ok.body.id]);
+    expect(raw[0]?.content_enc.includes(Buffer.from('%PDF'))).toBe(false);
+
+    // Téléchargement par le commerçant : contenu identique
+    const dl = await s.get(`/v1/orgs/${orgId}/kyb/documents/${ok.body.id}/download`).buffer(true).parse((res, cb) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(Buffer.compare(dl.body as Buffer, PDF)).toBe(0);
+
+    // Une autre organisation ne voit rien
+    const other = await registerMerchant(ctx, 'kybother@admin.test');
+    expect((await other.s.get(`/v1/orgs/${orgId}/kyb/documents`)).status).toBe(404);
+
+    // Conformité : le support n'a pas accès ; root consulte → journalisé
+    const support = await adminSession(ctx, 'support@admin.test');
+    expect((await support.get(`/v1/admin/organizations/${orgId}/kyb/documents`)).status).toBe(403);
+    const root = await adminSession(ctx, 'root@admin.test');
+    expect((await root.get(`/v1/admin/kyb/documents/${ok.body.id}/download`)).status).toBe(200);
+    const audit = await ownerQuery(`SELECT 1 FROM audit_log WHERE action = 'admin.kyb.document_viewed' AND target_id = $1`, [ok.body.id]);
+    expect(audit.length).toBe(1);
+    expect((await root.post(`/v1/admin/kyb/documents/${ok.body.id}/review`, { decision: 'accepted', note: 'Extrait conforme' })).status).toBe(200);
   });
 });

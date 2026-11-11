@@ -58,3 +58,18 @@ function sortKeys(v: unknown): unknown {
   if (typeof v === 'bigint') return v.toString();
   return v;
 }
+
+/** Chiffrement binaire AES-256-GCM : [version 1 octet | iv 12 | tag 16 | ciphertext]. */
+export function encryptBytes(plain: Buffer, key: Buffer): Buffer {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return Buffer.concat([Buffer.from([1]), iv, cipher.getAuthTag(), ct]);
+}
+
+export function decryptBytes(payload: Buffer, key: Buffer): Buffer {
+  if (payload[0] !== 1 || payload.length < 29) throw new Error('Unsupported ciphertext format');
+  const decipher = createDecipheriv('aes-256-gcm', key, payload.subarray(1, 13));
+  decipher.setAuthTag(payload.subarray(13, 29));
+  return Buffer.concat([decipher.update(payload.subarray(29)), decipher.final()]);
+}

@@ -88,6 +88,10 @@ export default function OrgDetailPage({ params }: { params: Promise<{ id: string
         )}
       </Card>
 
+      <Card title="Justificatifs KYB">
+        <KybDocs orgId={id} onMessage={setMsg} />
+      </Card>
+
       <Card title="Statut du compte">
         {o.status === 'active' ? (
           <form className="vp-row" style={{ alignItems: 'flex-end' }} onSubmit={act(`/v1/admin/organizations/${id}/suspend`, {}, 'Organisation suspendue.')}>
@@ -161,6 +165,46 @@ export default function OrgDetailPage({ params }: { params: Promise<{ id: string
         {!o.providerAccounts.length && <p className="vp-muted">Aucun compte connecté.</p>}
         <a href={`/console/payments?orgId=${id}`}>Voir les transactions →</a>
       </Card>
+    </div>
+  );
+}
+
+function KybDocs({ orgId, onMessage }: { orgId: string; onMessage: (m: { kind: 'success' | 'danger'; text: string }) => void }) {
+  const { data, error, reload } = useLoad<{ id: string; kind: string; filename: string; status: string; sizeBytes: number; reviewNote: string | null }[]>(`/v1/admin/organizations/${orgId}/kyb/documents`);
+  if (error) return <p className="vp-muted vp-small">Accès réservé à la conformité.</p>;
+  if (!data) return <p className="vp-muted">Chargement…</p>;
+  if (!data.length) return <p className="vp-muted">Aucun justificatif déposé.</p>;
+  const review = async (docId: string, decision: 'accepted' | 'rejected') => {
+    const note = prompt(decision === 'accepted' ? 'Note de validation :' : 'Motif du refus :');
+    if (!note) return;
+    try {
+      await api(`/v1/admin/kyb/documents/${docId}/review`, { method: 'POST', body: { decision, note } });
+      onMessage({ kind: 'success', text: 'Revue enregistrée.' });
+      reload();
+    } catch (e) {
+      onMessage({ kind: 'danger', text: e instanceof ApiError ? e.message : 'Erreur' });
+    }
+  };
+  return (
+    <div className="vp-stack">
+      <p className="vp-muted vp-small" style={{ margin: 0 }}>Chaque téléchargement est inscrit au journal d’audit.</p>
+      {data.map((d) => (
+        <div key={d.id} className="vp-row vp-between">
+          <span>
+            <a href={`/api/v1/admin/kyb/documents/${d.id}/download`}>{d.filename}</a> <span className="vp-muted vp-small">{d.kind} · {Math.ceil(d.sizeBytes / 1024)} Ko</span>
+            {d.reviewNote && <div className="vp-muted vp-small">{d.reviewNote}</div>}
+          </span>
+          <span className="vp-row" style={{ gap: 6 }}>
+            <StatusBadge status={d.status === 'accepted' ? 'verified' : d.status === 'rejected' ? 'rejected' : 'pending'} label={d.status} />
+            {d.status === 'pending' && (
+              <>
+                <Button variant="ghost" onClick={() => review(d.id, 'accepted')}>Accepter</Button>
+                <Button variant="ghost" onClick={() => review(d.id, 'rejected')}>Refuser</Button>
+              </>
+            )}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
