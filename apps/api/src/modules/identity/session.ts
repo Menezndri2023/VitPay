@@ -22,6 +22,10 @@ export interface AuthContext {
   mfaVerified: boolean;
   mfaEnabled: boolean;
   platformRole: PlatformRole | null;
+  /** Défini si la requête est authentifiée par une clé API (API publique Business). */
+  apiKeyId?: string;
+  apiKeyOrgId?: string;
+  apiKeyScopes?: string[];
 }
 
 export interface OrgContext {
@@ -36,4 +40,9 @@ export interface VitpayRequest extends Request {
 
 export function clientInfo(req: Request): { ip: string | null; userAgent: string | null } {
   return { ip: req.ip ?? null, userAgent: (req.headers['user-agent'] as string | undefined)?.slice(0, 300) ?? null };
+}
+
+/** Acteur à journaliser pour une requête authentifiée (utilisateur ou clé API). */
+export function actorOf(a: AuthContext, req: Request): { userId: string; ip: string | null; userAgent: string | null; apiKeyId: string | null } {
+  return { userId: a.userId, ...clientInfo(req), apiKeyId: a.apiKeyId ?? null };
 }

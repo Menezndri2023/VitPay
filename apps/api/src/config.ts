@@ -27,6 +27,8 @@ const EnvSchema = z
     COOKIE_SECURE: bool.default('false'),
     WORKERS_ENABLED: bool.default('true'),
     MOCK_PSP_ENABLED: bool.default('true'),
+    /** Webhooks sortants vers des adresses privées/HTTP (développement uniquement). */
+    ALLOW_PRIVATE_WEBHOOK_URLS: bool.default('false'),
     /**
      * Garde-fou réglementaire (règles absolues 10 et 18) : aucune transaction réelle
      * tant que la validation juridique n'est pas formalisée.
@@ -39,6 +41,9 @@ const EnvSchema = z
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.MOCK_PSP_ENABLED) {
       ctx.addIssue({ code: 'custom', path: ['MOCK_PSP_ENABLED'], message: 'Mock PSP is forbidden in production' });
+    }
+    if (env.NODE_ENV === 'production' && env.ALLOW_PRIVATE_WEBHOOK_URLS) {
+      ctx.addIssue({ code: 'custom', path: ['ALLOW_PRIVATE_WEBHOOK_URLS'], message: 'Private webhook URLs are forbidden in production (SSRF)' });
     }
     if (env.NODE_ENV === 'production' && !env.COOKIE_SECURE) {
       ctx.addIssue({ code: 'custom', path: ['COOKIE_SECURE'], message: 'Secure cookies are required in production' });

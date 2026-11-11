@@ -172,3 +172,24 @@ test('KYB : dépôt d’un justificatif depuis les paramètres', async ({ page }
   await expect(page.getByRole('link', { name: 'attestation-ice.pdf' }).first()).toBeVisible();
   await shot(page, '14-kyb-upload');
 });
+
+test('développeurs : création d’une clé API puis appel de l’API avec cette clé', async ({ page, request }) => {
+  await page.goto(`${BIZ}/login`);
+  await page.getByLabel('E-mail').fill('marchand@vitpay.test');
+  await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
+  await page.getByRole('button', { name: 'Se connecter' }).click();
+  await page.waitForURL(/\/app/);
+  await page.goto(`${BIZ}/app/developers`);
+  await page.getByLabel('Nom de la clé').fill(`E2E ${Date.now()}`);
+  await page.getByRole('button', { name: 'Créer une clé' }).click();
+  const secret = await page.getByLabel('Secret').inputValue();
+  expect(secret).toMatch(/^vp_sk_/);
+  await shot(page, '15-developers');
+  const orgId = await page.locator('code').first().innerText();
+  const res = await request.post(`${BIZ}/api/v1/orgs/${orgId}/payment-requests`, {
+    headers: { authorization: `Bearer ${secret}`, 'idempotency-key': `e2e-api-${Date.now()}` },
+    data: { amount: '149.90', currency: 'MAD', description: 'Commande API' },
+  });
+  expect(res.status()).toBe(201);
+  expect((await res.json()).payUrl).toContain('/r/');
+});

@@ -11,6 +11,10 @@ Migrations SQL versionnées dans [`apps/api/migrations`](../apps/api/migrations)
 | `005_security` | RLS sur toutes les tables métier, droits de `vitpay_app` (révocation d'UPDATE et DELETE sur les tables immuables) |
 | `006_review_hardening` | Corrections de la revue : trigger ledger SECURITY DEFINER, unicités scopées, anti-rejeu MFA, jeton d'enrôlement admin |
 | `007_system_role` | Rôle `vitpay_system`, politiques sans contournement, moindre privilège, RLS sur `incidents` et `outbox_events` |
+| `008_commission_statements` | Relevés de commissions et lignes (un paiement facturé une seule fois) |
+| `009_email_invitations` | File d'e-mails, réinitialisations de mot de passe, invitations d'équipe |
+| `010_kyb_documents` | Justificatifs KYB chiffrés |
+| `011_api_keys_webhooks` | Clés API (empreintes), endpoints et livraisons de webhooks sortants |
 
 ## Relations principales
 

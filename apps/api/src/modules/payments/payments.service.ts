@@ -105,7 +105,7 @@ export class PaymentsService {
 
   async createRequest(
     orgId: string,
-    actor: { userId: string; ip: string | null; userAgent: string | null },
+    actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null },
     input: { amount: string; currency: string; description?: string; customerName?: string; customerContact?: string; expiresInHours?: number; posId?: string },
   ) {
     if (!isCurrency(input.currency)) throw Errors.validation({ currency: 'Unsupported currency' });
@@ -148,7 +148,7 @@ export class PaymentsService {
         ],
       );
       await this.audit.record(tx, {
-        actor: { type: 'user', ...actor },
+        actor: { type: actor.apiKeyId ? 'api_key' : 'user', ...actor },
         orgId,
         action: 'payment_request.created',
         targetType: 'payment_request',
@@ -271,7 +271,7 @@ export class PaymentsService {
     });
   }
 
-  async cancelRequest(orgId: string, id: string, actor: { userId: string; ip: string | null; userAgent: string | null }, reason?: string) {
+  async cancelRequest(orgId: string, id: string, actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null }, reason?: string) {
     return this.db.forOrg(orgId, async (tx) => {
       const r = await tx.maybeOne<PaymentRequestRow>('SELECT * FROM payment_requests WHERE id = $1 FOR UPDATE', [id]);
       if (!r) throw Errors.notFound('Payment request');
@@ -282,7 +282,7 @@ export class PaymentsService {
         `UPDATE payment_requests SET status = 'cancelled', cancelled_at = now(), version = version + 1, updated_at = now() WHERE id = $1 RETURNING *`,
         [id],
       );
-      await this.audit.record(tx, { actor: { type: 'user', ...actor }, orgId, action: 'payment_request.cancelled', targetType: 'payment_request', targetId: id, reason, before: { status: r.status }, after: { status: 'cancelled' } });
+      await this.audit.record(tx, { actor: { type: actor.apiKeyId ? 'api_key' : 'user', ...actor }, orgId, action: 'payment_request.cancelled', targetType: 'payment_request', targetId: id, reason, before: { status: r.status }, after: { status: 'cancelled' } });
       return this.requestView(u);
     });
   }

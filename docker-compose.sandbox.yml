@@ -15,6 +15,7 @@ x-api-env: &api-env
   EMAIL_TRANSPORT: smtp
   SMTP_URL: smtp://mailpit:1025
   MOCK_PSP_ENABLED: "true"
+  ALLOW_PRIVATE_WEBHOOK_URLS: "true" # sandbox locale uniquement
   PAYMENTS_LIVE_ENABLED: "false"
 
 services:

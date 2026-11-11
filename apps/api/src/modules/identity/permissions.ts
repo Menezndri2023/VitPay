@@ -14,11 +14,12 @@ export type OrgPermission =
   | 'refunds:create'
   | 'ledger:read'
   | 'exports:read'
-  | 'billing:read';
+  | 'billing:read'
+  | 'developers:manage';
 
 const ORG_ROLE_PERMISSIONS: Record<OrgRole, readonly OrgPermission[]> = {
-  owner: ['org:read', 'org:update', 'members:manage', 'pos:manage', 'providers:manage', 'requests:create', 'requests:read', 'requests:cancel', 'refunds:create', 'ledger:read', 'exports:read', 'billing:read'],
-  admin: ['org:read', 'org:update', 'pos:manage', 'providers:manage', 'requests:create', 'requests:read', 'requests:cancel', 'refunds:create', 'ledger:read', 'exports:read', 'billing:read'],
+  owner: ['org:read', 'org:update', 'members:manage', 'pos:manage', 'providers:manage', 'requests:create', 'requests:read', 'requests:cancel', 'refunds:create', 'ledger:read', 'exports:read', 'billing:read', 'developers:manage'],
+  admin: ['org:read', 'org:update', 'pos:manage', 'providers:manage', 'requests:create', 'requests:read', 'requests:cancel', 'refunds:create', 'ledger:read', 'exports:read', 'billing:read', 'developers:manage'],
   cashier: ['org:read', 'requests:create', 'requests:read'],
   viewer: ['org:read', 'requests:read', 'ledger:read', 'exports:read', 'billing:read'],
 };
@@ -74,3 +75,7 @@ export function platformRoleHas(role: PlatformRole, perm: AdminPermission): bool
 export function platformRolePermissions(role: PlatformRole): readonly AdminPermission[] {
   return PLATFORM_ROLE_PERMISSIONS[role];
 }
+
+/** Périmètres attribuables à une clé API (sous-ensemble strict des permissions d'organisation). */
+export const API_KEY_SCOPES = ['requests:create', 'requests:read', 'requests:cancel', 'refunds:create'] as const;
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];

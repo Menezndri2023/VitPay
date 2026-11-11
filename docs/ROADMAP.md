@@ -15,6 +15,8 @@
 
 ## Backlog prioritaire (prochaines itérations)
 
+0. ☑ API publique Business (clés API) et webhooks sortants signés — [`DEVELOPERS.md`](DEVELOPERS.md).
+
 1. Appels d'offres prestataires (CMI, NAPS, Payzone, établissement de paiement) et obtention d'une sandbox. **Chemin critique.**
 2. Adaptateur du prestataire n°1 et tests de contrat.
 3. ☑ Stockage chiffré des justificatifs KYB ; ☑ invitations d'équipe par e-mail ; ☑ mot de passe oublié.

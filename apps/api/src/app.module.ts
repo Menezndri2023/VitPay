@@ -7,6 +7,8 @@ import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health.controller';
 import { AdminController } from './modules/admin/admin.controller';
 import { AdminService } from './modules/admin/admin.service';
+import { DevelopersController } from './modules/developers/developers.controller';
+import { DevelopersService } from './modules/developers/developers.service';
 import { EmailService } from './modules/email/email.service';
 import { PasswordResetService } from './modules/identity/password-reset.service';
 import { OrgInvitationsController, PublicInvitationsController } from './modules/organizations/invitations.controller';
@@ -64,6 +66,7 @@ export class AppModule {
       PublicInvitationsController,
       OrgKybDocumentsController,
       AdminKybDocumentsController,
+      DevelopersController,
     ];
     if (config.MOCK_PSP_ENABLED) controllers.push(MockPspController);
 
@@ -100,6 +103,7 @@ export class AppModule {
         PasswordResetService,
         InvitationsService,
         KybDocumentsService,
+        DevelopersService,
         JobsService,
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: SecurityGuard },

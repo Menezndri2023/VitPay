@@ -7,7 +7,7 @@ import { Errors } from '../../common/errors';
 import { ZodPipe } from '../../common/zod.pipe';
 import { Db } from '../../database/db.service';
 import { Auth, Org, Public, RequireOrgPermission } from '../identity/decorators';
-import { AuthContext, clientInfo, OrgContext, VitpayRequest } from '../identity/session';
+import { actorOf, AuthContext, clientInfo, OrgContext, VitpayRequest } from '../identity/session';
 import { LedgerService } from '../ledger/ledger.service';
 import { IdempotencyService } from '../platform/idempotency.service';
 import { ReceiptsService } from '../receipts/receipts.service';
@@ -66,7 +66,7 @@ export class PaymentsController {
   ) {
     const r = await this.idempotency.run(`payment_request:${org.orgId}`, key, body, async () => ({
       status: 201,
-      body: await this.payments.createRequest(org.orgId, { userId: a.userId, ...clientInfo(req) }, body),
+      body: await this.payments.createRequest(org.orgId, actorOf(a, req), body),
     }));
     res.status(r.status);
     if (r.replayed) res.setHeader('Idempotent-Replayed', 'true');
@@ -97,7 +97,7 @@ export class PaymentsController {
   @HttpCode(200)
   @Post('payment-requests/:id/cancel')
   cancel(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('id', new ZodPipe(UUID)) id: string, @Body(new ZodPipe(Cancel)) body: z.infer<typeof Cancel>, @Req() req: VitpayRequest) {
-    return this.payments.cancelRequest(org.orgId, id, { userId: a.userId, ...clientInfo(req) }, body.reason);
+    return this.payments.cancelRequest(org.orgId, id, actorOf(a, req), body.reason);
   }
 
   @RequireOrgPermission('refunds:create')
@@ -112,7 +112,7 @@ export class PaymentsController {
   ) {
     const r = await this.idempotency.run(`refund:${org.orgId}`, key, body, async () => ({
       status: 201,
-      body: await this.refunds.create(org.orgId, { userId: a.userId, ...clientInfo(req) }, body),
+      body: await this.refunds.create(org.orgId, actorOf(a, req), body),
     }));
     res.status(r.status);
     return r.body;

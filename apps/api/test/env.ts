@@ -17,5 +17,6 @@ export const TEST_ENV = {
   COOKIE_SECURE: 'false',
   WORKERS_ENABLED: 'false',
   MOCK_PSP_ENABLED: 'true',
+  ALLOW_PRIVATE_WEBHOOK_URLS: 'true',
   PAYMENTS_LIVE_ENABLED: 'false',
 };

@@ -3,7 +3,7 @@
 - **Base** : `http://localhost:4710` en local (via les apps : `/api/...`).
 - **Format** : JSON. Montants `{ "minor": "50000", "value": "500.00", "currency": "MAD" }`. Dates ISO 8601 UTC.
 - **Erreurs** : `application/problem+json` (RFC 9457) `{ type, title, status, code, details? }`.
-- **Authentification** : cookie de session (`vp_session` / `vp_admin_session`) ou `Authorization: Bearer <jeton>`. Avec un cookie, les mutations exigent `x-vitpay-csrf: 1`.
+- **Authentification** : cookie de session (`vp_session` / `vp_admin_session`), `Authorization: Bearer <jeton de session>`, ou **clé API d'organisation** `Authorization: Bearer vp_sk_…` (routes `/v1/orgs/:orgId/...` de son organisation, dans la limite de ses périmètres ; voir [`DEVELOPERS.md`](DEVELOPERS.md)). Avec un cookie, les mutations exigent `x-vitpay-csrf: 1`.
 - **Idempotence** : en-tête `Idempotency-Key` (8 à 128 caractères) **obligatoire** sur les créations marquées 🔑. Un rejeu renvoie la même réponse avec `Idempotent-Replayed: true` ; la même clé avec un autre corps renvoie 422.
 
 ## Authentification
@@ -26,6 +26,7 @@
 | GET / POST / DELETE | `/members`, `/members/:userId` | (`members:manage`) |
 | GET / POST | `/points-of-sale` | (`pos:manage`) |
 | GET / POST / DELETE | `/invitations`, `/invitations/:id` | Invitations par e-mail (`members:manage`) |
+| GET | `/developers/catalog` · GET/POST/DELETE `/developers/api-keys[/:id]` · GET/POST/DELETE `/developers/webhooks[/:id]` · POST `/developers/webhooks/:id/test` | Intégrations (`developers:manage`, session humaine uniquement) |
 | GET / POST | `/kyb/documents` (multipart `file` + `kind`), GET `/kyb/documents/:id/download` | Justificatifs KYB chiffrés, PDF/PNG/JPEG ≤ 5 Mo (`org:update`) |
 | GET / POST / DELETE | `/providers`, `/providers/:accountId` | Comptes prestataires (`providers:manage`) |
 | POST 🔑 | `/payment-requests` | `{amount:"500.00", currency, description?, customerName?, customerContact?, expiresInHours?, posId?}` |

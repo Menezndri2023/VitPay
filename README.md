@@ -56,11 +56,11 @@ docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d --build
 
 ```bash
 pnpm --filter @vitpay/money test     # 9 tests (dont tests de propriétés)
-pnpm --filter @vitpay/api test       # 61 tests (unitaires + intégration sur PostgreSQL réel)
+pnpm --filter @vitpay/api test       # 66 tests (unitaires + intégration sur PostgreSQL réel)
 ./scripts/smoke.sh                   # parcours complet via les apps démarrées (API)
-MAILPIT_URL=http://localhost:8025 pnpm --filter @vitpay/e2e test   # 6 tests navigateur (Playwright + Chrome)
+MAILPIT_URL=http://localhost:8025 pnpm --filter @vitpay/e2e test   # 8 tests navigateur (Playwright + Chrome)
 ```
 
 ## Documentation
 
-[Rapport initial](docs/RAPPORT_INITIAL_PHASE0.md) · [PRD](docs/PRD.md) · [Architecture](docs/ARCHITECTURE.md) · [Cœur financier](docs/FINANCIAL_CORE.md) · [Parcours de paiement](docs/PAYMENT_FLOWS.md) · [API](docs/API_SPECIFICATION.md) · [Schéma](docs/DATABASE_SCHEMA.md) · [Sécurité](docs/SECURITY.md) · [**Conformité et points à légaliser**](docs/COMPLIANCE.md) · [Roadmap](docs/ROADMAP.md) · [Agents](docs/AGENTS.md) · [Décisions (ADR)](docs/DECISIONS.md)
+[Rapport initial](docs/RAPPORT_INITIAL_PHASE0.md) · [PRD](docs/PRD.md) · [Architecture](docs/ARCHITECTURE.md) · [Cœur financier](docs/FINANCIAL_CORE.md) · [Parcours de paiement](docs/PAYMENT_FLOWS.md) · [API](docs/API_SPECIFICATION.md) · [Schéma](docs/DATABASE_SCHEMA.md) · [Sécurité](docs/SECURITY.md) · [**Conformité et points à légaliser**](docs/COMPLIANCE.md) · [Guide d'intégration (API, webhooks)](docs/DEVELOPERS.md) · [Roadmap](docs/ROADMAP.md) · [Agents](docs/AGENTS.md) · [Décisions (ADR)](docs/DECISIONS.md)

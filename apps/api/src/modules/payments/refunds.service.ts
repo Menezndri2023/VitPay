@@ -47,7 +47,7 @@ export class RefundsService {
    * Demande de remboursement : réservée côté VITPAY (contrôle du plafond sous verrou),
    * puis exécutée PAR LE PRESTATAIRE. Le statut final provient du prestataire.
    */
-  async create(orgId: string, actor: { userId: string; ip: string | null; userAgent: string | null }, input: { attemptId: string; amount?: string; reason: string }) {
+  async create(orgId: string, actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null }, input: { attemptId: string; amount?: string; reason: string }) {
     const prepared = await this.db.forOrg(orgId, async (tx) => {
       const a = await tx.maybeOne<PaymentAttemptRow>('SELECT * FROM payment_attempts WHERE id = $1 FOR UPDATE', [input.attemptId]);
       if (!a) throw Errors.notFound('Payment');
@@ -86,7 +86,7 @@ export class RefundsService {
         [orgId, a.id, amount.minor.toString(), a.currency, input.reason, actor.userId],
       );
       await this.audit.record(tx, {
-        actor: { type: 'user', ...actor },
+        actor: { type: actor.apiKeyId ? 'api_key' : 'user', ...actor },
         orgId,
         action: 'refund.requested',
         targetType: 'refund',

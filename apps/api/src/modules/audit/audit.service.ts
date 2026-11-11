@@ -3,7 +3,9 @@ import { canonicalJson, sha256 } from '../../common/crypto';
 import { Db, Tx } from '../../database/db.service';
 
 export interface AuditActor {
-  type: 'user' | 'admin' | 'system' | 'provider' | 'public';
+  type: 'user' | 'admin' | 'system' | 'provider' | 'public' | 'api_key';
+  /** Clé API utilisée (actions faites via l'API publique). */
+  apiKeyId?: string | null;
   userId?: string | null;
   ip?: string | null;
   userAgent?: string | null;
@@ -49,7 +51,7 @@ export class AuditService {
       reason: e.reason ?? null,
       before: e.before ?? null,
       after: e.after ?? null,
-      metadata: e.metadata ?? null,
+      metadata: e.actor.apiKeyId ? { ...((e.metadata as Record<string, unknown>) ?? {}), apiKeyId: e.actor.apiKeyId } : (e.metadata ?? null),
     };
     const hash = sha256(Buffer.concat([prevHash ?? Buffer.alloc(0), Buffer.from(canonicalJson(content))]));
     await tx.query(

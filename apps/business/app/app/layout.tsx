@@ -11,6 +11,7 @@ const NAV = [
   { href: '/app/requests/new', label: 'Nouvelle demande' },
   { href: '/app/pos', label: 'Caisse (QR)' },
   { href: '/app/notifications', label: 'Notifications' },
+  { href: '/app/developers', label: 'Développeurs' },
   { href: '/app/settings', label: 'Paramètres' },
 ];
 
