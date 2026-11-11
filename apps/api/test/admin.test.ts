@@ -1,0 +1,139 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AuthService } from '../src/modules/identity/auth.service';
+import { adminSession, registerEnrollmentToken, connectMock, createRequest, login, PASSWORD, payerActs, registerMerchant, resetDb, startApp, TestCtx, tokenOf } from './helpers';
+
+describe('VITPAY ADMIN', () => {
+  let ctx: TestCtx;
+
+  beforeAll(async () => {
+    await resetDb();
+    ctx = await startApp();
+    const auth = ctx.app.get(AuthService);
+    for (const [email, name, role] of [
+      ['root@admin.test', 'Root', 'super_admin'],
+      ['fin@admin.test', 'Finance', 'finance'],
+      ['support@admin.test', 'Support', 'support'],
+      ['auditor@admin.test', 'Auditeur', 'auditor'],
+    ] as const) {
+      registerEnrollmentToken(email, (await auth.createPlatformAdmin(email, PASSWORD, name, role)).enrollmentToken);
+    }
+  });
+  afterAll(async () => ctx.close());
+
+  it('un compte commerçant ne peut pas se connecter à l’admin', async () => {
+    await registerMerchant(ctx, 'merchant@admin.test');
+    const r = await ctx.api().post('/v1/admin/auth/login').send({ email: 'merchant@admin.test', password: PASSWORD });
+    expect(r.status).toBe(401);
+  });
+
+  it('MFA obligatoire : sans enrôlement, aucune route admin n’est accessible', async () => {
+    const { s, body } = await login(ctx, 'support@admin.test', 'admin');
+    expect(body.mfaEnrollmentRequired).toBe(true);
+    const r = await s.get('/v1/admin/dashboard');
+    expect(r.status).toBe(403);
+    // Une session business ne donne pas accès à l'admin (cookies et audiences distincts)
+    const m = await login(ctx, 'merchant@admin.test');
+    expect((await m.s.get('/v1/admin/dashboard')).status).toBe(401);
+  });
+
+  it('permissions par rôle et masquage des données personnelles pour le support', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'kyb@admin.test', 'Société KYB');
+    await s.post(`/v1/orgs/${orgId}/kyb`, { legalName: 'SOCIETE KYB SARL', ice: '001234567000089', rc: 'RC12345', address: '1 Bd Anfa, Casablanca' });
+    const support = await adminSession(ctx, 'support@admin.test');
+    const org = await support.get(`/v1/admin/organizations/${orgId}`);
+    expect(org.status).toBe(200);
+    expect(org.body.ice).not.toBe('001234567000089');
+    expect((await support.post(`/v1/admin/organizations/${orgId}/suspend`, { reason: 'Test de permission' })).status).toBe(403);
+
+    const root = await adminSession(ctx, 'root@admin.test');
+    const full = await root.get(`/v1/admin/organizations/${orgId}`);
+    expect(full.body.ice).toBe('001234567000089');
+    const kyb = await root.post(`/v1/admin/organizations/${orgId}/kyb`, { decision: 'verified', reason: 'Documents conformes (test)' });
+    expect(kyb.status).toBe(200);
+  });
+
+  it('principe des quatre yeux : modification des frais', async () => {
+    const { orgId } = await registerMerchant(ctx, 'fees@admin.test', 'Org Frais');
+    const root = await adminSession(ctx, 'root@admin.test');
+    const fin = await adminSession(ctx, 'fin@admin.test');
+    const req = await root.post('/v1/admin/approvals', { action: 'org.fee.update', targetId: orgId, payload: { vitpayFeeBps: 120 }, reason: 'Nouvelle grille tarifaire' });
+    expect(req.status).toBe(201);
+    const self = await root.post(`/v1/admin/approvals/${req.body.id}/decision`, { decision: 'approved', note: 'auto-validation' });
+    expect(self.status).toBe(403);
+    const other = await fin.post(`/v1/admin/approvals/${req.body.id}/decision`, { decision: 'approved', note: 'Validé finance' });
+    expect(other.status).toBe(200);
+    const org = await root.get(`/v1/admin/organizations/${orgId}`);
+    expect(org.body.vitpayFeeBps).toBe(120);
+  });
+
+  it('suspension immédiate, réactivation sous quatre yeux', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'suspend@admin.test');
+    await connectMock(s, orgId);
+    const root = await adminSession(ctx, 'root@admin.test');
+    const fin = await adminSession(ctx, 'fin@admin.test');
+    expect((await root.post(`/v1/admin/organizations/${orgId}/suspend`, { reason: 'Activité suspecte (test)' })).status).toBe(200);
+    const blocked = await s.post(`/v1/orgs/${orgId}/payment-requests`, { amount: '10', currency: 'MAD' }, { 'Idempotency-Key': 'suspend-key-0001' });
+    expect(blocked.status).toBe(403);
+    const ar = await root.post('/v1/admin/approvals', { action: 'org.reactivate', targetId: orgId, reason: 'Contrôle effectué' });
+    expect(ar.status, JSON.stringify(ar.body)).toBe(201);
+    const dec = await fin.post(`/v1/admin/approvals/${ar.body.id}/decision`, { decision: 'approved', note: 'Validé' });
+    expect(dec.status, JSON.stringify(dec.body)).toBe(200);
+    const ok = await s.post(`/v1/orgs/${orgId}/payment-requests`, { amount: '10', currency: 'MAD' }, { 'Idempotency-Key': 'suspend-key-0002' });
+    expect(ok.status).toBe(201);
+  });
+
+  it('rapprochement : lignes concordantes réglées, écart détecté', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'recon@admin.test');
+    const accountId = await connectMock(s, orgId);
+    const r1 = await createRequest(s, orgId, '100.00');
+    await payerActs(ctx, tokenOf(r1.payUrl), 'succeed');
+    const r2 = await createRequest(s, orgId, '250.00');
+    await payerActs(ctx, tokenOf(r2.payUrl), 'succeed');
+    const fin = await adminSession(ctx, 'fin@admin.test');
+    const today = new Date().toISOString().slice(0, 10);
+    const run = await fin.post('/v1/admin/reconciliation/runs', { providerAccountId: accountId, date: today });
+    expect(run.status).toBe(201);
+    expect(run.body.status).toBe('completed');
+    expect(run.body.stats.matched).toBe(2);
+    const ledger = await s.get(`/v1/orgs/${orgId}/ledger/balances`);
+    const bal = Object.fromEntries(ledger.body.balances.map((b: { code: string; balanceMinor: string }) => [b.code, b.balanceMinor]));
+    expect(bal.provider_receivable).toBe('0');
+    expect(bal.bank_settled).toBe(String(35000 - 150 - 375));
+    // Rejouer le rapprochement est sans effet sur le ledger
+    await fin.post('/v1/admin/reconciliation/runs', { providerAccountId: accountId, date: today });
+    const again = await s.get(`/v1/orgs/${orgId}/ledger/balances`);
+    expect(again.body.balances).toEqual(ledger.body.balances);
+  });
+
+  it('enrôlement MFA admin impossible avec le seul mot de passe (jeton d’invitation requis)', async () => {
+    const { s } = await login(ctx, 'auditor@admin.test', 'admin');
+    expect((await s.post('/v1/admin/auth/mfa/setup', {})).status).toBe(422);
+    expect((await s.post('/v1/admin/auth/mfa/setup', { enrollmentToken: 'x'.repeat(32) })).status).toBe(403);
+  });
+
+  it('un auditeur ne voit pas les données personnelles dans le journal d’audit', async () => {
+    const auditor = await adminSession(ctx, 'auditor@admin.test');
+    const log = await auditor.get('/v1/admin/audit');
+    expect(log.status).toBe(200);
+    expect(JSON.stringify(log.body)).not.toContain('001234567000089');
+  });
+
+  it('approbations concurrentes : la seconde échoue si la valeur a changé', async () => {
+    const { orgId } = await registerMerchant(ctx, 'stale@admin.test', 'Org Stale');
+    const root = await adminSession(ctx, 'root@admin.test');
+    const fin = await adminSession(ctx, 'fin@admin.test');
+    const a1 = await root.post('/v1/admin/approvals', { action: 'org.fee.update', targetId: orgId, payload: { vitpayFeeBps: 100 }, reason: 'Grille A' });
+    const a2 = await root.post('/v1/admin/approvals', { action: 'org.fee.update', targetId: orgId, payload: { vitpayFeeBps: 200 }, reason: 'Grille B' });
+    expect((await fin.post(`/v1/admin/approvals/${a1.body.id}/decision`, { decision: 'approved', note: 'Validé' })).status).toBe(200);
+    expect((await fin.post(`/v1/admin/approvals/${a2.body.id}/decision`, { decision: 'approved', note: 'Validé' })).status).toBe(409);
+  });
+
+  it('journal d’audit consultable et vérifiable', async () => {
+    const root = await adminSession(ctx, 'root@admin.test');
+    const log = await root.get('/v1/admin/audit?action=admin.');
+    expect(log.status).toBe(200);
+    expect(log.body.length).toBeGreaterThan(0);
+    const v = await root.get('/v1/admin/audit/verify');
+    expect(v.body.ok).toBe(true);
+  });
+});

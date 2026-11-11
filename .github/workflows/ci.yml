@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vitpay_owner
+          POSTGRES_PASSWORD: dev_owner_password_change_me
+          POSTGRES_DB: vitpay
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vitpay_owner -d vitpay"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Initialiser les rôles et la base de test
+        env:
+          PGPASSWORD: dev_owner_password_change_me
+        run: psql -h localhost -p 5433 -U vitpay_owner -d vitpay -f infra/postgres/init.sql
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @vitpay/money build
+      - name: Typecheck
+        run: |
+          pnpm --filter @vitpay/api typecheck
+          pnpm --filter @vitpay/ui typecheck
+      - name: Tests
+        run: |
+          pnpm --filter @vitpay/money test
+          pnpm --filter @vitpay/api test
+      - name: Build
+        run: |
+          pnpm --filter @vitpay/api build
+          pnpm --filter @vitpay/pay build
+          pnpm --filter @vitpay/business build
+          pnpm --filter @vitpay/admin build
+      - name: Recherche de secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
