@@ -15,8 +15,11 @@ import { money, PaymentsService } from './payments.service';
 import { RefundsService } from './refunds.service';
 
 const UUID = z.string().uuid();
+/** Référence de commande du commerçant : 1 à 64 caractères sûrs, unique par organisation. */
+const MerchantRef = z.string().trim().regex(/^[A-Za-z0-9._:/#-]{1,64}$/, 'Use 1-64 characters: letters, digits and . _ : / # -');
 const CreateRequest = z.object({
   amount: z.string().trim().min(1).max(24),
+  merchantReference: MerchantRef.optional(),
   currency: z.string().length(3).default('MAD'),
   description: z.string().trim().max(200).optional(),
   customerName: z.string().trim().max(120).optional(),
@@ -30,6 +33,7 @@ const ListQuery = z.object({
   before: z.string().datetime().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   posId: UUID.optional(),
+  merchantReference: MerchantRef.optional(),
 });
 const Cancel = z.object({ reason: z.string().max(200).optional() });
 const CreateRefund = z.object({ attemptId: UUID, amount: z.string().max(24).optional(), reason: z.string().trim().min(3).max(200) });
@@ -83,6 +87,13 @@ export class PaymentsController {
   @Get('payment-requests/:id')
   get(@Org() org: OrgContext, @Param('id', new ZodPipe(UUID)) id: string) {
     return this.payments.getRequest(org.orgId, id);
+  }
+
+  /** Historique des événements de la transaction (journal d'audit chaîné, sans données techniques sensibles). */
+  @RequireOrgPermission('requests:read')
+  @Get('payment-requests/:id/events')
+  events(@Org() org: OrgContext, @Param('id', new ZodPipe(UUID)) id: string) {
+    return this.payments.getRequestEvents(org.orgId, id);
   }
 
   @RequireOrgPermission('requests:read')
@@ -159,8 +170,8 @@ export class PaymentsController {
     if (!d.safeParse(from).success || !d.safeParse(to).success) throw Errors.validation({ range: 'from/to must be YYYY-MM-DD' });
     const rows = await this.db.forOrg(org.orgId, (tx) =>
       tx.query<Record<string, unknown>>(
-        `SELECT pr.reference, pr.created_at, pr.status AS request_status, a.status AS payment_status, a.amount_minor, a.currency,
-                a.provider_fee_minor, a.vitpay_fee_minor, a.provider_code, a.provider_ref, a.succeeded_at, a.settlement_status,
+        `SELECT pr.reference, pr.merchant_reference, pr.created_at, pr.status AS request_status, a.status AS payment_status, a.amount_minor, a.currency,
+                a.provider_fee_minor, a.vitpay_fee_minor, a.vitpay_fee_waived_minor, a.provider_code, a.provider_ref, a.succeeded_at, a.settlement_status,
                 pr.description, pr.customer_name
            FROM payment_requests pr LEFT JOIN payment_attempts a ON a.payment_request_id = pr.id
           WHERE ($1::date IS NULL OR pr.created_at >= $1::date) AND ($2::date IS NULL OR pr.created_at < ($2::date + 1))

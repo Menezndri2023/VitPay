@@ -177,7 +177,7 @@ export function tokenOf(payUrl: string): string {
 }
 
 /** Simule le payeur : démarre une tentative puis agit sur la page du prestataire simulé. */
-export async function payerActs(ctx: TestCtx, token: string, action: 'succeed' | 'decline' | 'challenge' | 'cancel'): Promise<{ attemptId: string; providerRef: string }> {
+export async function payerActs(ctx: TestCtx, token: string, action: 'succeed' | 'decline' | 'challenge' | 'cancel' | 'pending'): Promise<{ attemptId: string; providerRef: string }> {
   const start = await ctx.api().post(`/v1/public/requests/${token}/attempts`).send({ method: 'card' });
   if (start.status !== 201) throw new Error(`start attempt failed ${start.status} ${JSON.stringify(start.body)}`);
   const providerRef = String(start.body.checkoutUrl).split('/checkout/')[1] as string;

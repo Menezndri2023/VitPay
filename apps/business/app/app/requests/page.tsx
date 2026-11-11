@@ -72,6 +72,7 @@ export default function RequestsPage() {
                       {r.reference}
                     </a>
                     {r.mode === 'sandbox' && <span className="vp-badge vp-badge-warning" style={{ marginInlineStart: 6 }}>test</span>}
+                    {r.merchantReference && <div className="vp-small vp-muted vp-mono">{r.merchantReference}</div>}
                   </td>
                   <td style={{ fontWeight: 600 }}>{formatMoney(r.amount)}</td>
                   <td className="vp-muted">{r.description ?? '—'}</td>

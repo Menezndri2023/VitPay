@@ -45,9 +45,14 @@ export class MockProvider implements PaymentProvider {
     };
   }
 
+  /** Base des appels serveur à serveur vers le prestataire simulé (réseau interne si configuré). */
+  private get base(): string {
+    return this.config.MOCK_PSP_INTERNAL_URL ?? this.config.PUBLIC_API_URL;
+  }
+
   private async call<T>(account: ProviderAccountContext, method: 'GET' | 'POST', path: string, body?: unknown, idem?: string): Promise<T> {
     if (account.mode !== 'sandbox') throw Errors.legalGate();
-    const res = await fetch(`${this.config.PUBLIC_API_URL}/mock-psp/api${path}`, {
+    const res = await fetch(`${this.base}/mock-psp/api${path}`, {
       method,
       headers: {
         authorization: `Bearer ${account.credentials.apiKey ?? ''}`,
@@ -62,10 +67,12 @@ export class MockProvider implements PaymentProvider {
   }
 
   async provisionSandboxAccount(input: { orgId: string; webhookUrl: string }) {
-    const res = await fetch(`${this.config.PUBLIC_API_URL}/mock-psp/api/merchants`, {
+    // Les notifications du prestataire simulé restent sur le réseau interne.
+    const webhookUrl = input.webhookUrl.startsWith(this.config.PUBLIC_API_URL) ? `${this.base}${input.webhookUrl.slice(this.config.PUBLIC_API_URL.length)}` : input.webhookUrl;
+    const res = await fetch(`${this.base}/mock-psp/api/merchants`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ webhookUrl: input.webhookUrl }),
+      body: JSON.stringify({ webhookUrl }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw Errors.provider(`Mock PSP onboarding failed with ${res.status}`);

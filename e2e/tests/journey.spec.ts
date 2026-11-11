@@ -227,3 +227,42 @@ test('connexion : le paramètre next ne peut pas rediriger hors du site', async 
     expect(new URL(page.url()).origin, next).toBe(new URL(BIZ).origin);
   }
 });
+
+test('paiement en attente : référence de commande, confirmation différée simulée, historique des événements', async ({ page, context }) => {
+  const ref = `CMD-E2E-${Date.now()}`;
+  await page.goto(`${BIZ}/login`);
+  await page.getByLabel('E-mail').fill('marchand@vitpay.test');
+  await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
+  await page.getByRole('button', { name: 'Se connecter' }).click();
+  await page.waitForURL(/\/app/);
+  await page.goto(`${BIZ}/app/requests/new`);
+  await page.getByLabel('Montant (MAD)').fill('77');
+  await page.getByLabel('Référence de commande (facultatif, unique)').fill(ref);
+  await page.getByRole('button', { name: 'Générer le lien et le QR code' }).click();
+  await expect(page.getByRole('heading', { name: /Demande créée/ })).toBeVisible();
+  const payUrl = await page.getByLabel('Lien de paiement').inputValue();
+
+  // Le payeur valide, la banque ne répond pas encore
+  const payer = await context.browser()!.newContext({ locale: 'fr-FR' });
+  const p = await payer.newPage();
+  await p.goto(payUrl);
+  await p.getByRole('button', { name: 'Payer par carte bancaire' }).click();
+  await p.getByRole('button', { name: 'Payer — confirmation différée (en attente)' }).click();
+  await expect(p.getByText(/Vérification en cours/)).toBeVisible({ timeout: 20_000 });
+  await shot(p, '16-pay-pending');
+
+  // Côté commerçant : retrouver la commande, simuler la réponse de la banque
+  await page.goto(`${BIZ}/app/requests`);
+  await page.locator('tr', { hasText: ref }).locator('a.vp-mono').click();
+  await expect(page.getByText(`commande ${ref}`)).toBeVisible();
+  await page.getByRole('button', { name: 'Simuler : banque confirme' }).click();
+  await expect(page.locator('h1 .vp-badge', { hasText: 'Payée' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: 'Historique des événements' })).toBeVisible();
+  await expect(page.getByText('Demande créée')).toBeVisible();
+  await expect(page.getByText(/Statut de la tentative.*Confirmé/).first()).toBeVisible();
+  await shot(page, '17-events');
+
+  // Le payeur voit la confirmation (preuve serveur)
+  await expect(p.getByText('Paiement confirmé')).toBeVisible({ timeout: 20_000 });
+  await payer.close();
+});

@@ -36,9 +36,10 @@ export class AuditService {
    */
   async record(tx: Tx, e: AuditEntry): Promise<void> {
     await tx.query('SELECT pg_advisory_xact_lock($1)', [AUDIT_LOCK_KEY]);
-    // Lecture du dernier hash : le journal d'audit n'est pas soumis à RLS (voir 005_security.sql).
-    const last = await tx.maybeOne<{ hash: Buffer }>('SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1');
-    const prevHash = last?.hash ?? null;
+    // Dernière empreinte de la chaîne GLOBALE, via une fonction dédiée : le rôle applicatif ne
+    // lit le journal que pour son organisation (RLS, migration 020).
+    const last = await tx.one<{ hash: Buffer | null }>('SELECT audit_last_hash() AS hash');
+    const prevHash = last.hash ?? null;
     const occurredAt = new Date().toISOString();
     const content = {
       occurredAt,

@@ -26,6 +26,7 @@ export default function NewRequestPage() {
         body: {
           amount: String(fd.get('amount')).trim(),
           currency: 'MAD',
+          merchantReference: String(fd.get('merchantReference') || '').trim() || undefined,
           description: String(fd.get('description') || '') || undefined,
           customerName: String(fd.get('customerName') || '') || undefined,
           expiresInHours: Number(fd.get('expiresInHours')) || undefined,
@@ -72,6 +73,14 @@ export default function NewRequestPage() {
       <Card>
         <form className="vp-stack" onSubmit={submit}>
           <Field label="Montant (MAD)" name="amount" inputMode="decimal" placeholder="500,00" required autoFocus pattern="^\d+([.,]\d{1,2})?$" />
+          <Field
+            label="Référence de commande (facultatif, unique)"
+            name="merchantReference"
+            maxLength={64}
+            pattern="^[A-Za-z0-9._:\/#\-]{1,64}$"
+            placeholder="Ex. CMD-2026-0042"
+            hint="Une commande ne peut donner lieu qu’à une seule demande de paiement."
+          />
           <Field label="Motif (visible par le payeur)" name="description" maxLength={200} placeholder="Ex. Remboursement, Facture n° 2026-104" />
           <Field label="Nom du client (privé, non affiché au payeur)" name="customerName" maxLength={120} />
           <Field label="Validité (heures)" name="expiresInHours" type="number" min={1} max={720} defaultValue={72} />

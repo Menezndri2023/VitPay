@@ -217,7 +217,7 @@ export class OrganizationsService {
   }
 
   async auditLog(orgId: string) {
-    // audit_log n'est pas sous RLS : filtrage explicite par organisation.
+    // RLS (migration 020) + filtre explicite par organisation (défense en profondeur).
     const rows = await this.db.forOrg(orgId, (tx) =>
       tx.query(
         `SELECT id, occurred_at, actor_type, actor_user_id, action, target_type, target_id, reason

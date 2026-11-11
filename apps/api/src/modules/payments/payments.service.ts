@@ -24,6 +24,7 @@ import {
 export interface PaymentRequestRow {
   id: string;
   org_id: string;
+  merchant_reference?: string | null;
   pos_id: string | null;
   created_by: string;
   reference: string;
@@ -98,6 +99,11 @@ export class PaymentsService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
+  private async merchantRefOf(tx: Tx, requestId: string): Promise<string | null> {
+    const r = await tx.maybeOne<{ merchant_reference: string | null }>('SELECT merchant_reference FROM payment_requests WHERE id = $1', [requestId]);
+    return r?.merchant_reference ?? null;
+  }
+
   payUrl(token: string): string {
     return `${this.config.PAY_BASE_URL}/r/${token}`;
   }
@@ -107,7 +113,7 @@ export class PaymentsService {
   async createRequest(
     orgId: string,
     actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null },
-    input: { amount: string; currency: string; description?: string; customerName?: string; customerContact?: string; expiresInHours?: number; posId?: string },
+    input: { amount: string; currency: string; merchantReference?: string; description?: string; customerName?: string; customerContact?: string; expiresInHours?: number; posId?: string },
   ) {
     if (!isCurrency(input.currency)) throw Errors.validation({ currency: 'Unsupported currency' });
     let amount: Money;
@@ -119,6 +125,24 @@ export class PaymentsService {
     if (!amount.isPositive()) throw Errors.validation({ amount: 'Amount must be positive' });
     const ttl = Math.min(input.expiresInHours ?? this.config.PAYMENT_REQUEST_DEFAULT_TTL_HOURS, MAX_TTL_HOURS);
 
+    try {
+      return await this.createRequestTx(orgId, actor, input, amount, ttl);
+    } catch (e) {
+      // Deux créations simultanées avec la même référence : l'index unique tranche.
+      if (isUniqueViolation(e, 'payment_requests_merchant_ref_uq')) {
+        throw Errors.conflict('merchant_reference_exists', 'A payment request already exists for this order reference');
+      }
+      throw e;
+    }
+  }
+
+  private async createRequestTx(
+    orgId: string,
+    actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null },
+    input: { merchantReference?: string; description?: string; customerName?: string; customerContact?: string; posId?: string },
+    amount: Money,
+    ttl: number,
+  ) {
     return this.db.forOrg(orgId, async (tx) => {
       const cur = await tx.maybeOne<{ enabled: boolean }>('SELECT enabled FROM currencies WHERE code = $1', [amount.currency]);
       if (!cur?.enabled) throw Errors.validation({ currency: `${amount.currency} is not enabled on VITPAY yet` });
@@ -129,10 +153,15 @@ export class PaymentsService {
         if (!pos) throw Errors.validation({ posId: 'Unknown point of sale' });
       }
       const mode = await this.resolveMode(tx, amount.currency);
+      // [P5] Une commande = une demande : référence unique par organisation (index unique en base).
+      if (input.merchantReference) {
+        const dup = await tx.maybeOne<{ id: string; status: string }>('SELECT id, status FROM payment_requests WHERE merchant_reference = $1', [input.merchantReference]);
+        if (dup) throw Errors.conflict('merchant_reference_exists', 'A payment request already exists for this order reference', { requestId: dup.id, status: dup.status });
+      }
       const row = await tx.one<PaymentRequestRow>(
         `INSERT INTO payment_requests (org_id, pos_id, created_by, reference, public_token, amount_minor, currency, description,
-            customer_name, customer_contact, mode, status, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open', now() + make_interval(hours => $12)) RETURNING *`,
+            customer_name, customer_contact, mode, status, expires_at, merchant_reference)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open', now() + make_interval(hours => $12), $13) RETURNING *`,
         [
           orgId,
           input.posId ?? null,
@@ -146,6 +175,7 @@ export class PaymentsService {
           input.customerContact ?? null,
           mode,
           ttl,
+          input.merchantReference ?? null,
         ],
       );
       await this.audit.record(tx, {
@@ -154,9 +184,15 @@ export class PaymentsService {
         action: 'payment_request.created',
         targetType: 'payment_request',
         targetId: row.id,
-        after: { reference: row.reference, amount: amount.toJSON(), mode },
+        after: { reference: row.reference, merchantReference: row.merchant_reference ?? null, amount: amount.toJSON(), mode },
       });
-      await this.outbox.publish(tx, { eventType: 'payment_request.created', aggregateType: 'payment_request', aggregateId: row.id, orgId, payload: { reference: row.reference } });
+      await this.outbox.publish(tx, {
+        eventType: 'payment_request.created',
+        aggregateType: 'payment_request',
+        aggregateId: row.id,
+        orgId,
+        payload: { reference: row.reference, merchantReference: row.merchant_reference ?? null },
+      });
       return this.requestView(row);
     });
   }
@@ -182,6 +218,7 @@ export class PaymentsService {
     return {
       id: r.id,
       reference: r.reference,
+      merchantReference: r.merchant_reference ?? null,
       amount: money(r.amount_minor, r.currency),
       description: r.description,
       customerName: r.customer_name,
@@ -216,17 +253,18 @@ export class PaymentsService {
     };
   }
 
-  async listRequests(orgId: string, f: { status?: PaymentRequestStatus; q?: string; before?: string; limit?: number; posId?: string }) {
+  async listRequests(orgId: string, f: { status?: PaymentRequestStatus; q?: string; before?: string; limit?: number; posId?: string; merchantReference?: string }) {
     const limit = Math.min(Math.max(f.limit ?? 25, 1), 100);
     const rows = await this.db.forOrg(orgId, (tx) =>
       tx.query<PaymentRequestRow>(
         `SELECT * FROM payment_requests
           WHERE ($1::text IS NULL OR status = $1)
-            AND ($2::text IS NULL OR reference ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%' OR customer_name ILIKE '%' || $2 || '%')
+            AND ($2::text IS NULL OR reference ILIKE '%' || $2 || '%' OR merchant_reference ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%' OR customer_name ILIKE '%' || $2 || '%')
             AND ($3::timestamptz IS NULL OR created_at < $3)
             AND ($5::uuid IS NULL OR pos_id = $5)
+            AND ($6::text IS NULL OR merchant_reference = $6)
           ORDER BY created_at DESC LIMIT $4`,
-        [f.status ?? null, f.q ?? null, f.before ?? null, limit + 1, f.posId ?? null],
+        [f.status ?? null, f.q ?? null, f.before ?? null, limit + 1, f.posId ?? null, f.merchantReference ?? null],
       ),
     );
     const page = rows.slice(0, limit);
@@ -269,7 +307,47 @@ export class PaymentsService {
         refunds: refunds.map((x) => ({ id: x.id, attemptId: x.payment_attempt_id, amount: money(x.amount_minor, x.currency), status: x.status, reason: x.reason, createdAt: x.created_at.toISOString() })),
         disputes: disputes.map((d) => ({ id: d.id, status: d.status, amount: money(d.amount_minor, d.currency), reason: d.reason, createdAt: d.created_at.toISOString() })),
         receipt: receipt ? { number: receipt.number, attemptId: receipt.payment_attempt_id } : null,
+        events: await this.eventsFor(tx, r.id, attempts.map((a) => a.id), refunds.map((x) => x.id), disputes.map((d) => d.id)),
       };
+    });
+  }
+
+  /**
+   * [P5] Historique des événements d'une demande (création, tentatives, changements de statut,
+   * remboursements, litiges, annulation, commission annulée), tiré du journal d'audit chaîné.
+   * Données exposées : action, statut avant/après, acteur (type), date — jamais d'IP ni de navigateur.
+   */
+  private async eventsFor(tx: Tx, requestId: string, attemptIds: string[], refundIds: string[], disputeIds: string[]) {
+    const rows = await tx.query<{ id: string; occurred_at: Date; actor_type: string; action: string; target_type: string; target_id: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null; reason: string | null }>(
+      `SELECT id::text, occurred_at, actor_type, action, target_type, target_id, before, after, reason FROM audit_log
+        WHERE (target_type = 'payment_request' AND target_id = $1)
+           OR (target_type = 'payment_attempt' AND target_id = ANY($2::text[]))
+           OR (target_type = 'refund' AND target_id = ANY($3::text[]))
+           OR (target_type = 'dispute' AND target_id = ANY($4::text[]))
+        ORDER BY id ASC LIMIT 500`,
+      [requestId, attemptIds, refundIds, disputeIds],
+    );
+    const statusOf = (v: Record<string, unknown> | null) => (v && typeof v.status === 'string' ? v.status : null);
+    return rows.map((e) => ({
+      id: e.id,
+      at: e.occurred_at.toISOString(),
+      type: e.action,
+      object: { type: e.target_type, id: e.target_id },
+      from: statusOf(e.before),
+      to: statusOf(e.after),
+      actor: e.actor_type,
+      reason: e.reason,
+    }));
+  }
+
+  async getRequestEvents(orgId: string, id: string) {
+    return this.db.forOrg(orgId, async (tx) => {
+      const r = await tx.maybeOne<{ id: string }>('SELECT id FROM payment_requests WHERE id = $1', [id]);
+      if (!r) throw Errors.notFound('Payment request');
+      const attempts = await tx.query<{ id: string }>('SELECT id FROM payment_attempts WHERE payment_request_id = $1', [id]);
+      const refunds = await tx.query<{ id: string }>('SELECT r.id FROM refunds r JOIN payment_attempts a ON a.id = r.payment_attempt_id WHERE a.payment_request_id = $1', [id]);
+      const disputes = await tx.query<{ id: string }>('SELECT d.id FROM disputes d JOIN payment_attempts a ON a.id = d.payment_attempt_id WHERE a.payment_request_id = $1', [id]);
+      return { requestId: id, events: await this.eventsFor(tx, id, attempts.map((a) => a.id), refunds.map((x) => x.id), disputes.map((d) => d.id)) };
     });
   }
 
@@ -591,7 +669,7 @@ export class PaymentsService {
           aggregateType: 'payment_attempt',
           aggregateId: attempt.id,
           orgId,
-          payload: { requestId: attempt.payment_request_id, amount: expected.toJSON() },
+          payload: { requestId: attempt.payment_request_id, merchantReference: await this.merchantRefOf(tx, attempt.payment_request_id), amount: expected.toJSON() },
         });
       } else if (to === 'failed' || to === 'cancelled' || to === 'expired') {
         await this.outbox.publish(tx, {
@@ -599,7 +677,7 @@ export class PaymentsService {
           aggregateType: 'payment_attempt',
           aggregateId: attempt.id,
           orgId,
-          payload: { requestId: attempt.payment_request_id, status: to, failureCode: payment.failureCode ?? null },
+          payload: { requestId: attempt.payment_request_id, merchantReference: await this.merchantRefOf(tx, attempt.payment_request_id), status: to, failureCode: payment.failureCode ?? null },
         });
       }
     });

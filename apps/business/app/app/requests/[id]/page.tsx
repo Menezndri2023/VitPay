@@ -4,7 +4,7 @@ import { FormEvent, use, useCallback, useEffect, useState } from 'react';
 import { Alert, ApiError, Button, Card, Field, formatDate, formatMoney, newIdempotencyKey, StatusBadge } from '@vitpay/ui';
 import { useOrg } from '../../org-context';
 import { SharePanel } from '../../share-panel';
-import { RequestDetail, STATUS_LABELS } from '../../types';
+import { ACTOR_LABELS, EVENT_LABELS, RequestDetail, STATUS_LABELS } from '../../types';
 
 export default function RequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -46,6 +46,15 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
     }
   };
 
+  /** Sandbox : réponse différée de la banque pour un paiement en attente (prestataire simulé). */
+  const resolvePending = async (providerRef: string, outcome: 'succeeded' | 'failed') => {
+    setMsg(null);
+    const res = await fetch(`/api/mock-psp/simulate/payments/${encodeURIComponent(providerRef)}/resolve/${outcome}`, { method: 'POST' });
+    if (!res.ok) setMsg({ kind: 'danger', text: 'Simulation impossible (paiement déjà terminé ?)' });
+    else setMsg({ kind: 'success', text: 'Réponse de la banque simulée : la confirmation arrive par notification du prestataire.' });
+    setTimeout(() => void load(), 1200);
+  };
+
   if (!r) return <p className="vp-muted">Chargement…</p>;
   const succeeded = r.attempts.filter((a) => a.status === 'succeeded');
 
@@ -53,7 +62,10 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
     <div className="vp-stack" style={{ maxWidth: 900 }}>
       <div className="vp-row vp-between">
         <div>
-          <div className="vp-muted vp-small vp-mono">{r.reference}</div>
+          <div className="vp-muted vp-small vp-mono">
+            {r.reference}
+            {r.merchantReference && <> · commande {r.merchantReference}</>}
+          </div>
           <h1 style={{ margin: 0 }}>
             {formatMoney(r.amount)} <StatusBadge status={r.displayStatus} label={STATUS_LABELS[r.displayStatus]} />
           </h1>
@@ -126,6 +138,16 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                   <td>
                     <StatusBadge status={a.status} label={STATUS_LABELS[a.status]} />
                     {a.failureCode && <div className="vp-small vp-muted">{a.failureCode}</div>}
+                    {r.mode === 'sandbox' && a.status === 'processing' && a.providerCode === 'mock' && a.providerRef && (
+                      <div className="vp-row" style={{ gap: 6, marginTop: 6 }}>
+                        <Button variant="ghost" onClick={() => resolvePending(a.providerRef as string, 'succeeded')}>
+                          Simuler : banque confirme
+                        </Button>
+                        <Button variant="ghost" onClick={() => resolvePending(a.providerRef as string, 'failed')}>
+                          Simuler : banque refuse
+                        </Button>
+                      </div>
+                    )}
                   </td>
                   <td>{formatMoney(a.providerFee)}</td>
                   <td>
@@ -171,6 +193,28 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
             ))}
         </Card>
       )}
+
+      <Card title="Historique des événements">
+        <p className="vp-muted vp-small" style={{ marginTop: 0 }}>
+          Journal infalsifiable (chaîné) : chaque changement de statut est tracé.
+        </p>
+        <ol className="vp-stack" style={{ gap: 6, margin: 0, paddingInlineStart: 18 }}>
+          {r.events.map((e) => (
+            <li key={e.id} className="vp-small">
+              <span className="vp-muted">{formatDate(e.at)}</span> — <strong>{EVENT_LABELS[e.type] ?? e.type}</strong>
+              {e.to && (
+                <>
+                  {' : '}
+                  {e.from ? `${STATUS_LABELS[e.from] ?? e.from} → ` : ''}
+                  {STATUS_LABELS[e.to] ?? e.to}
+                </>
+              )}
+              <span className="vp-muted"> · {ACTOR_LABELS[e.actor] ?? e.actor}</span>
+              {e.reason && <span className="vp-muted"> · {e.reason}</span>}
+            </li>
+          ))}
+        </ol>
+      </Card>
 
       {r.disputes.length > 0 && (
         <Card title="Litiges">

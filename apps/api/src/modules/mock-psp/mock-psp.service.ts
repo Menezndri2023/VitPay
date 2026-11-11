@@ -33,7 +33,8 @@ interface Hook {
   body: string;
 }
 
-export type CheckoutAction = 'succeed' | 'decline' | 'challenge' | 'cancel';
+/** `pending` : le payeur a validé, la banque n'a pas encore répondu (résolution ultérieure, voir resolvePayment). */
+export type CheckoutAction = 'succeed' | 'decline' | 'challenge' | 'cancel' | 'pending';
 
 @Injectable()
 export class MockPspService {
@@ -130,7 +131,15 @@ export class MockPspService {
       if (!p) throw Errors.notFound('Payment');
       if (!['pending', 'requires_action'].includes(p.status)) return p;
       const next =
-        action === 'succeed' ? 'succeeded' : action === 'decline' ? 'failed' : action === 'challenge' ? 'requires_action' : 'cancelled';
+        action === 'succeed'
+          ? 'succeeded'
+          : action === 'decline'
+            ? 'failed'
+            : action === 'challenge'
+              ? 'requires_action'
+              : action === 'pending'
+                ? 'processing'
+                : 'cancelled';
       const updated = await tx.one<MockPayment>(
         `UPDATE mock_psp.payments SET status = $2, failure_code = $3, updated_at = now(),
            succeeded_at = CASE WHEN $2 = 'succeeded' THEN now() ELSE succeeded_at END
@@ -144,6 +153,30 @@ export class MockPspService {
     if (payment.status === 'requires_action') return `${this.checkoutUrl(paymentId)}?step=3ds`;
     const sep = payment.return_url.includes('?') ? '&' : '?';
     return `${payment.return_url}${sep}psp_status=${encodeURIComponent(payment.status)}`;
+  }
+
+  /**
+   * Résolution ultérieure d'un paiement en traitement (réponse différée de la banque, simulée).
+   * Le prestataire notifie VITPAY par webhook ; VITPAY relit ensuite le statut côté serveur.
+   */
+  async resolvePayment(paymentId: string, outcome: 'succeeded' | 'failed'): Promise<{ status: string }> {
+    this.assertEnabled();
+    const hooks: Hook[] = [];
+    const updated = await this.db.system(async (tx) => {
+      const p = await tx.maybeOne<MockPayment>('SELECT * FROM mock_psp.payments WHERE id = $1 FOR UPDATE', [paymentId]);
+      if (!p) throw Errors.notFound('Payment');
+      if (p.status !== 'processing') throw Errors.invalidState(`Payment is ${p.status}, not processing`);
+      const u = await tx.one<MockPayment>(
+        `UPDATE mock_psp.payments SET status = $2, failure_code = $3, updated_at = now(),
+           succeeded_at = CASE WHEN $2 = 'succeeded' THEN now() ELSE succeeded_at END
+         WHERE id = $1 RETURNING *`,
+        [paymentId, outcome, outcome === 'failed' ? 'issuer_declined' : null],
+      );
+      await this.queueWebhook(tx, hooks, p.merchant_id, 'payment.updated', paymentId);
+      return u;
+    });
+    this.dispatch(hooks);
+    return { status: updated.status };
   }
 
   async refund(merchantId: string, paymentId: string, input: { externalRef: string; amountMinor: string }) {

@@ -41,6 +41,11 @@ const EnvSchema = z
         return items.every(isStrictKey) && new Set(items).size === items.length;
       }, 'APP_ENCRYPTION_KEYS_PREVIOUS must be comma-separated canonical base64 32-byte keys, without empty items or duplicates'),
     PUBLIC_API_URL: z.string().url().default('http://localhost:4710'),
+    /**
+     * Prestataire simulé : adresse INTERNE pour les appels serveur à serveur et ses notifications
+     * (ex. http://api:4710 en conteneurs). Le navigateur utilise toujours PUBLIC_API_URL.
+     */
+    MOCK_PSP_INTERNAL_URL: z.string().url().optional(),
     PAY_BASE_URL: z.string().url().default('http://localhost:3710'),
     /** URL de l'espace Business (liens dans les e-mails : invitation, réinitialisation). */
     BUSINESS_APP_URL: z.string().url().default('http://localhost:3711'),

@@ -72,6 +72,18 @@ export class MockPspController {
     return this.psp.openDispute(id);
   }
 
+  /** Réponse différée de la banque pour un paiement « en cours » (formulaire de la page hébergée ou appel direct). */
+  @Post('simulate/payments/:id/resolve/:outcome')
+  async resolvePayment(@Param('id') id: string, @Param('outcome') outcome: string, @Query('return') ret: string | undefined, @Res() res: Response) {
+    if (outcome !== 'succeeded' && outcome !== 'failed') {
+      res.status(400).json({ error: 'outcome must be succeeded|failed' });
+      return;
+    }
+    const r = await this.psp.resolvePayment(id, outcome);
+    if (ret === 'page') res.redirect(303, `/mock-psp/checkout/${encodeURIComponent(id)}`);
+    else res.json(r);
+  }
+
   @Post('simulate/disputes/:id/:outcome')
   async resolveDispute(@Param('id') id: string, @Param('outcome') outcome: string) {
     if (outcome !== 'won' && outcome !== 'lost') return { error: 'outcome must be won|lost' };
@@ -90,7 +102,13 @@ export class MockPspController {
     const actions =
       step === '3ds'
         ? `<p><strong>Authentification 3-D Secure simulée</strong></p>${btn('succeed', 'Valider l’authentification')}${btn('decline', 'Échec de l’authentification', 'background:#b42318')}`
-        : `${btn('succeed', 'Payer — scénario succès')}${btn('challenge', 'Payer — avec 3-D Secure', 'background:#344054')}${btn('decline', 'Carte refusée', 'background:#b42318')}${btn('cancel', 'Abandonner', 'background:#667085')}`;
+        : `${btn('succeed', 'Payer — scénario succès')}${btn('challenge', 'Payer — avec 3-D Secure', 'background:#344054')}${btn('pending', 'Payer — confirmation différée (en attente)', 'background:#b54708')}${btn('decline', 'Carte refusée', 'background:#b42318')}${btn('cancel', 'Abandonner', 'background:#667085')}`;
+    const resolve = (outcome: 'succeeded' | 'failed', label: string, style = '') =>
+      `<form method="post" action="/mock-psp/simulate/payments/${esc(p.id)}/resolve/${outcome}?return=page"><button style="${style}">${esc(label)}</button></form>`;
+    const processing =
+      p.status === 'processing'
+        ? `<p><strong>Paiement en cours de traitement par la banque (simulé).</strong></p>${resolve('succeeded', 'Simuler : la banque confirme')}${resolve('failed', 'Simuler : la banque refuse', 'background:#b42318')}`
+        : '';
     // La soumission redirige vers la page de retour (autre origine) : la CSP doit l'autoriser explicitement.
     let returnOrigin = '';
     try {
@@ -115,14 +133,14 @@ small{color:#667085}</style></head><body><div class="card">
 <div class="amount">${esc(amount)}</div>
 <p>${esc(p.description ?? '')}</p>
 <p><small>Statut : ${esc(p.status)} · Réf. ${esc(p.id)}</small></p>
-${open ? actions : `<p>Ce paiement est terminé.</p><a href="${esc(p.return_url)}">Retour</a>`}
+${open ? actions : processing || `<p>Ce paiement est terminé.</p><a href="${esc(p.return_url)}">Retour</a>`}
 <p><small>Cette page simule un prestataire agréé. Aucune donnée de carte n’est saisie ni traitée.</small></p>
 </div></body></html>`);
   }
 
   @Post('checkout/:id/:action')
   async checkoutAction(@Param('id') id: string, @Param('action') action: string, @Res() res: Response) {
-    const allowed: CheckoutAction[] = ['succeed', 'decline', 'challenge', 'cancel'];
+    const allowed: CheckoutAction[] = ['succeed', 'decline', 'challenge', 'cancel', 'pending'];
     if (!allowed.includes(action as CheckoutAction)) {
       res.status(400).send('Invalid action');
       return;
