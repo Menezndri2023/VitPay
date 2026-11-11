@@ -36,6 +36,8 @@ const EnvSchema = z
     PAYMENTS_LIVE_ENABLED: bool.default('false'),
     LEGAL_SIGNOFF_REF: z.string().optional(),
     PAYMENT_REQUEST_DEFAULT_TTL_HOURS: z.coerce.number().int().positive().default(72),
+    /** Jeton d'accès à /health/metrics (absent = endpoint désactivé). */
+    METRICS_TOKEN: z.string().min(24).optional(),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   })
   .superRefine((env, ctx) => {

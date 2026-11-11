@@ -22,7 +22,7 @@
 3. ☑ Stockage chiffré des justificatifs KYB ; ☑ invitations d'équipe par e-mail ; ☑ mot de passe oublié.
 4. ☑ Canal e-mail (SMTP, file + reprise ; fournisseur de production à choisir) ; SMS (fournisseur à choisir) ; WhatsApp Business API (à étudier).
 4b. ☑ Images Docker (API, worker, apps) et pile sandbox conteneurisée.
-5. Observabilité : Sentry, OpenTelemetry, alertes sur les incidents critiques.
+5. ◐ Observabilité : ☑ identifiant de requête (réponses d'erreur incluses), journaux d'accès JSON expurgés, métriques Prometheus protégées (`/health/metrics`, gauges incidents critiques et files) ; ☐ Sentry, OpenTelemetry, règles d'alerte (dépendent de l'hébergement).
 6. ☑ Tests e2e navigateur (Playwright) : parcours complet, RTL, caisse, admin, mobile.
 7. Rotation des clés de chiffrement ; anti-rejeu TOTP ; limitation de débit distribuée.
 8. ☑ Relevés de commissions VITPAY (hors flux, pro forma) — format de facture définitif après E2.

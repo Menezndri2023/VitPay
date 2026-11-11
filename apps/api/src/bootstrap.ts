@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AppConfig } from './config';
+import { requestContext } from './common/observability';
 import { CSRF_HEADER } from './modules/identity/security.guard';
 
 export async function createApp(config: AppConfig): Promise<INestApplication> {
@@ -16,6 +17,7 @@ export async function createApp(config: AppConfig): Promise<INestApplication> {
   });
   app.set('trust proxy', 'loopback');
   app.disable('x-powered-by');
+  app.use(requestContext({ logRequests: config.NODE_ENV !== 'test' }));
   app.useBodyParser('json', { limit: '100kb' });
   app.useBodyParser('urlencoded', { extended: false, limit: '20kb' });
   app.use(
@@ -30,7 +32,8 @@ export async function createApp(config: AppConfig): Promise<INestApplication> {
   app.enableCors({
     origin: config.allowedOrigins,
     credentials: true,
-    allowedHeaders: ['content-type', 'idempotency-key', CSRF_HEADER],
+    allowedHeaders: ['content-type', 'idempotency-key', 'x-request-id', CSRF_HEADER],
+    exposedHeaders: ['x-request-id'],
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   });
   app.enableShutdownHooks();

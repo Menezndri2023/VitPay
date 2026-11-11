@@ -2,6 +2,7 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from '@n
 import type { Request, Response } from 'express';
 import { ThrottlerException } from '@nestjs/throttler';
 import { AppError } from './errors';
+import { redactPath } from './observability';
 
 @Catch()
 export class ProblemFilter implements ExceptionFilter {
@@ -10,7 +11,7 @@ export class ProblemFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const res = ctx.getResponse<Response>();
-    const req = ctx.getRequest<Request>();
+    const req = ctx.getRequest<Request & { requestId?: string }>();
 
     let status = 500;
     let code = 'internal_error';
@@ -32,12 +33,13 @@ export class ProblemFilter implements ExceptionFilter {
       title = exception.message;
     } else {
       // Ne jamais exposer la stack ou le message interne au client.
-      this.logger.error({ msg: 'Unhandled error', path: req.url, err: (exception as Error)?.stack ?? String(exception) });
+      this.logger.error({ msg: 'Unhandled error', requestId: req.requestId, path: redactPath(req.url), err: (exception as Error)?.stack ?? String(exception) });
     }
 
     res
       .status(status)
       .type('application/problem+json')
-      .json({ type: `https://docs.vitpay.ma/errors/${code}`, title, status, code, ...(details ? { details } : {}) });
+      // requestId : à communiquer au support pour retrouver la requête dans les journaux.
+      .json({ type: `https://docs.vitpay.ma/errors/${code}`, title, status, code, requestId: req.requestId, ...(details ? { details } : {}) });
   }
 }

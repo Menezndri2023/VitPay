@@ -54,7 +54,7 @@
 - PostgreSQL managé avec réplica, PITR et sauvegardes chiffrées. **Admin derrière VPN ou zero-trust.**
 - Domaines séparés : `pay.`, `business.` et `admin.`.
 - Secrets dans un gestionnaire (aucun dans le dépôt) et rotation de `APP_ENCRYPTION_KEY` (plan à écrire).
-- Observabilité : logs JSON, Sentry et OpenTelemetry (à brancher en phase pré-production).
+- Observabilité : `x-request-id` propagé (renvoyé dans chaque erreur pour le support), journaux d'accès JSON sans jetons ni corps, métriques Prometheus sur `/health/metrics` (jeton `METRICS_TOKEN`). Alerte recommandée : `vitpay_critical_incidents > 0`. Sentry et OpenTelemetry restent à brancher selon l'hébergeur.
 - Le choix entre hébergement au Maroc et à l'étranger dépend de la ligne C2 de [`COMPLIANCE.md`](COMPLIANCE.md).
 
 ## Évolutions prévues
