@@ -140,7 +140,8 @@ export class PaymentsController {
            FROM payment_requests WHERE created_at > now() - interval '30 days' GROUP BY currency, status`,
       );
       const daily = await tx.query<{ day: string; currency: 'MAD'; sum: string; count: string }>(
-        `SELECT to_char(date_trunc('day', succeeded_at), 'YYYY-MM-DD') AS day, currency, sum(amount_minor)::text AS sum, count(*)::text AS count
+        // Jour calendaire marocain (le marché de référence), pas UTC.
+        `SELECT to_char(date_trunc('day', succeeded_at AT TIME ZONE 'Africa/Casablanca'), 'YYYY-MM-DD') AS day, currency, sum(amount_minor)::text AS sum, count(*)::text AS count
            FROM payment_attempts WHERE status = 'succeeded' AND succeeded_at > now() - interval '30 days'
           GROUP BY 1, 2 ORDER BY 1`,
       );

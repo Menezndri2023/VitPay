@@ -91,6 +91,17 @@ export class MockPspController {
       step === '3ds'
         ? `<p><strong>Authentification 3-D Secure simulée</strong></p>${btn('succeed', 'Valider l’authentification')}${btn('decline', 'Échec de l’authentification', 'background:#b42318')}`
         : `${btn('succeed', 'Payer — scénario succès')}${btn('challenge', 'Payer — avec 3-D Secure', 'background:#344054')}${btn('decline', 'Carte refusée', 'background:#b42318')}${btn('cancel', 'Abandonner', 'background:#667085')}`;
+    // La soumission redirige vers la page de retour (autre origine) : la CSP doit l'autoriser explicitement.
+    let returnOrigin = '';
+    try {
+      returnOrigin = new URL(p.return_url).origin;
+    } catch {
+      /* URL invalide : seule l'origine courante est autorisée */
+    }
+    res.setHeader(
+      'Content-Security-Policy',
+      `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${returnOrigin}; frame-ancestors 'none'; base-uri 'none'`,
+    );
     res.type('html').send(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Prestataire simulé — Sandbox</title>
 <style>body{font-family:system-ui,sans-serif;background:#f2f4f7;margin:0;padding:16px;color:#101828}

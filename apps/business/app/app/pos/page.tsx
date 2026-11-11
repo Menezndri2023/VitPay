@@ -63,6 +63,20 @@ export default function PosPage() {
     setAmount('');
   };
 
+  /** Abandon en caisse : la demande est annulée pour que le QR affiché ne soit plus payable. */
+  const abandon = async () => {
+    if (current?.status === 'open') {
+      try {
+        await orgApi(`/payment-requests/${current.id}/cancel`, { method: 'POST', body: { reason: 'Abandon en caisse' } });
+      } catch (e) {
+        // Un paiement est en cours chez le prestataire : on ne masque pas la demande.
+        setError(e instanceof ApiError ? 'Un paiement est en cours : attendez sa confirmation ou son échec.' : 'Erreur');
+        return;
+      }
+    }
+    reset();
+  };
+
   if (current)
     return (
       <div className="vp-stack" style={{ maxWidth: 480, margin: '0 auto', textAlign: 'center' }}>
@@ -73,7 +87,8 @@ export default function PosPage() {
             <img src={`/api/v1/orgs/${orgId}/payment-requests/${current.id}/qr.svg`} alt="QR code à scanner par le client" style={{ width: '100%', maxWidth: 340, margin: '0 auto', background: '#fff', borderRadius: 12, padding: 10 }} />
             <p className="vp-muted">Le client scanne ce QR code avec son téléphone pour payer.</p>
             <Alert kind="info">En attente de la confirmation du prestataire…</Alert>
-            <Button variant="ghost" onClick={reset}>
+            {error && <Alert kind="danger">{error}</Alert>}
+            <Button variant="ghost" onClick={abandon}>
               Abandonner
             </Button>
           </>

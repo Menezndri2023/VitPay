@@ -49,7 +49,8 @@ Pour essayer : Business → *Nouvelle demande* → ouvrir le lien → *Payer par
 ```bash
 pnpm --filter @vitpay/money test     # 9 tests (dont tests de propriétés)
 pnpm --filter @vitpay/api test       # 55 tests (unitaires + intégration sur PostgreSQL réel)
-./scripts/smoke.sh                   # parcours complet via les apps démarrées
+./scripts/smoke.sh                   # parcours complet via les apps démarrées (API)
+pnpm --filter @vitpay/e2e test       # 5 tests navigateur (Playwright + Chrome)
 ```
 
 ## Documentation

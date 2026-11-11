@@ -2,7 +2,8 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAt
 
 export function Logo({ href = '/' }: { href?: string }) {
   return (
-    <a className="vp-logo" href={href} aria-label="VITPAY">
+    // dir="ltr" : la marque reste « VITPAY » même dans une page en arabe (RTL).
+    <a className="vp-logo" href={href} aria-label="VITPAY" dir="ltr">
       VIT<b>PAY</b>
     </a>
   );

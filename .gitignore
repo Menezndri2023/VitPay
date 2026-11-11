@@ -8,3 +8,5 @@ coverage/
 !.env.example
 .DS_Store
 next-env.d.ts
+.logs/
+e2e/test-results/
