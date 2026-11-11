@@ -173,7 +173,7 @@ export class PaymentsService {
           return false;
         }
       });
-    if (this.config.PAYMENTS_LIVE_ENABLED && usable('live')) return 'live';
+    if (this.config.PAYMENTS_LIVE_ENABLED && this.config.appEnv === 'production' && usable('live')) return 'live';
     if (usable('sandbox')) return 'sandbox';
     throw Errors.invalidState('No active payment provider account supports this currency. Connect a provider first.', { currency });
   }

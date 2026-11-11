@@ -130,3 +130,22 @@ export function Footer() {
     </footer>
   );
 }
+
+/**
+ * Bandeau d'environnement (P4) : affiché en staging sur toutes les pages, fixé au build
+ * (NEXT_PUBLIC_VITPAY_ENV). Aucune transaction réelle n'est possible dans cet environnement.
+ */
+// Remplacé à la compilation par Next (variable NEXT_PUBLIC_*) ; déclaration minimale pour le typage.
+declare const process: { env: { NEXT_PUBLIC_VITPAY_ENV?: string } };
+
+export function EnvBanner() {
+  if (process.env.NEXT_PUBLIC_VITPAY_ENV !== 'staging') return null;
+  return (
+    <div
+      role="note"
+      style={{ background: '#b42318', color: '#fff', textAlign: 'center', padding: '6px 12px', fontSize: 13, fontWeight: 600, letterSpacing: 0.2 }}
+    >
+      VITPAY STAGING — environnement de test : paiements simulés, aucune transaction réelle, données fictives uniquement
+    </div>
+  );
+}

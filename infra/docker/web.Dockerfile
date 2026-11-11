@@ -3,7 +3,9 @@ ARG APP
 FROM node:22-bookworm-slim AS build
 ARG APP
 ARG VITPAY_API_URL=http://api:4710
-ENV NEXT_TELEMETRY_DISABLED=1 VITPAY_API_URL=$VITPAY_API_URL
+# « staging » : bandeau d'environnement de test sur toutes les pages (fixé au build).
+ARG NEXT_PUBLIC_VITPAY_ENV=local
+ENV NEXT_TELEMETRY_DISABLED=1 VITPAY_API_URL=$VITPAY_API_URL NEXT_PUBLIC_VITPAY_ENV=$NEXT_PUBLIC_VITPAY_ENV
 WORKDIR /repo
 RUN corepack enable
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./

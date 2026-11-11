@@ -23,7 +23,8 @@ export class HealthController {
     return {
       status: 'ok',
       service: 'vitpay-api',
-      paymentsMode: this.config.PAYMENTS_LIVE_ENABLED ? 'live-enabled' : 'sandbox-only',
+      environment: this.config.appEnv,
+      paymentsMode: this.config.PAYMENTS_LIVE_ENABLED && this.config.appEnv === 'production' ? 'live-enabled' : 'sandbox-only',
     };
   }
 

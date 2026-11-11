@@ -45,7 +45,8 @@ export class ProviderRegistry {
 
   /** Garde-fou réglementaire : un compte `live` n'est utilisable que si le mode live est autorisé. */
   assertModeAllowed(mode: ProviderMode): void {
-    if (mode === 'live' && !this.config.PAYMENTS_LIVE_ENABLED) throw Errors.legalGate();
+    // Double verrou : drapeau juridique ET environnement de production (jamais en local ni en staging).
+    if (mode === 'live' && (!this.config.PAYMENTS_LIVE_ENABLED || this.config.appEnv !== 'production')) throw Errors.legalGate();
   }
 
   context(row: ProviderAccountRow): ProviderAccountContext {

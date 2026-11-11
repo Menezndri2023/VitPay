@@ -180,6 +180,18 @@ describe('sécurité et isolation', () => {
     const res = await s.post(`/v1/orgs/${orgId}/providers`, { providerCode: 'mock', mode: 'live', credentials: { apiKey: 'x' }, webhookSecret: 'y' });
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('live_payments_disabled');
+    // Double verrou : même avec le drapeau juridique, aucun compte live hors production (local, staging).
+    const cfg = ctx.config as { PAYMENTS_LIVE_ENABLED: boolean; LEGAL_SIGNOFF_REF?: string };
+    cfg.PAYMENTS_LIVE_ENABLED = true;
+    cfg.LEGAL_SIGNOFF_REF = 'PV-TEST';
+    try {
+      await ownerQuery(`UPDATE organizations SET kyb_status = 'verified' WHERE id = $1`, [orgId]);
+      const again = await s.post(`/v1/orgs/${orgId}/providers`, { providerCode: 'mock', mode: 'live', credentials: { apiKey: 'x' }, webhookSecret: 'y' });
+      expect(again.body.code).toBe('live_payments_disabled');
+    } finally {
+      cfg.PAYMENTS_LIVE_ENABLED = false;
+      cfg.LEGAL_SIGNOFF_REF = undefined;
+    }
   });
 
   it('configuration : le mode live exige une référence de validation juridique', async () => {

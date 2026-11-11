@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { EnvBanner } from '@vitpay/ui';
 import '@vitpay/ui/src/styles.css';
 
 export const metadata: Metadata = {
@@ -13,7 +14,10 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, them
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="fr">
-      <body>{children}</body>
+      <body>
+        <EnvBanner />
+        {children}
+      </body>
     </html>
   );
 }

@@ -7,7 +7,7 @@ async function main(): Promise<void> {
   await app.listen(config.PORT);
   // eslint-disable-next-line no-console
   console.log(
-    `VITPAY API listening on :${config.PORT} — payments: ${config.PAYMENTS_LIVE_ENABLED ? 'LIVE ENABLED' : 'sandbox only'}${config.MOCK_PSP_ENABLED ? ' — mock PSP enabled' : ''}`,
+    `VITPAY API listening on :${config.PORT} — env: ${config.appEnv} — payments: ${config.PAYMENTS_LIVE_ENABLED ? 'LIVE ENABLED' : 'sandbox only'}${config.MOCK_PSP_ENABLED ? ' — mock PSP enabled' : ''}`,
   );
 }
 
