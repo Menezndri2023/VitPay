@@ -141,23 +141,7 @@ export default function SettingsPage() {
             </tbody>
           </table>
         </div>
-        {can('members:manage') && (
-          <form className="vp-row" style={{ alignItems: 'flex-end', marginTop: 12 }} onSubmit={(e) => { const d = form(e); void run(() => orgApi('/members', { method: 'POST', body: d }), 'Collaborateur ajouté.'); }}>
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <Field label="E-mail d’un compte VITPAY existant" name="email" type="email" required />
-            </div>
-            <div style={{ width: 160 }}>
-              <Select label="Rôle" name="role" defaultValue="cashier">
-                <option value="admin">Administrateur</option>
-                <option value="cashier">Caissier</option>
-                <option value="viewer">Lecture seule</option>
-              </Select>
-            </div>
-            <Button type="submit" variant="ghost">
-              Ajouter
-            </Button>
-          </form>
-        )}
+        {can('members:manage') && <Invitations onChange={load} />}
       </Card>
 
       <Card title="Points de vente">
@@ -175,6 +159,63 @@ export default function SettingsPage() {
           Commission VITPAY : <strong>{(org.vitpayFeeBps / 100).toFixed(2)} %</strong> par paiement confirmé (facturée séparément). Les frais de votre prestataire s’appliquent selon votre contrat avec lui.
         </p>
       </Card>
+    </div>
+  );
+}
+
+function Invitations({ onChange }: { onChange: () => Promise<void> }) {
+  const { orgApi } = useOrg();
+  const [pending, setPending] = useState<{ id: string; email: string; role: string; expiresAt: string }[]>([]);
+  const [msg, setMsg] = useState<{ kind: 'success' | 'danger'; text: string } | null>(null);
+  const load = useCallback(() => orgApi<typeof pending>('/invitations').then(setPending), [orgApi]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return (
+    <div className="vp-stack" style={{ marginTop: 12 }}>
+      {pending.map((p) => (
+        <div key={p.id} className="vp-row vp-between vp-small">
+          <span>
+            ✉️ {p.email} <span className="vp-badge vp-badge-warning">invitation en attente · {p.role}</span>
+          </span>
+          <Button variant="ghost" onClick={async () => { await orgApi(`/invitations/${p.id}`, { method: 'DELETE' }); await load(); }}>
+            Révoquer
+          </Button>
+        </div>
+      ))}
+      <form
+        className="vp-row"
+        style={{ alignItems: 'flex-end' }}
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const formEl = e.currentTarget;
+          const d = Object.fromEntries(new FormData(formEl)) as Record<string, string>;
+          try {
+            await orgApi('/invitations', { method: 'POST', body: d });
+            setMsg({ kind: 'success', text: `Invitation envoyée à ${d.email}.` });
+            formEl.reset();
+            await load();
+            await onChange();
+          } catch (err) {
+            setMsg({ kind: 'danger', text: err instanceof ApiError ? err.message : 'Erreur' });
+          }
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <Field label="Inviter par e-mail" name="email" type="email" required />
+        </div>
+        <div style={{ width: 160 }}>
+          <Select label="Rôle" name="role" defaultValue="cashier">
+            <option value="admin">Administrateur</option>
+            <option value="cashier">Caissier</option>
+            <option value="viewer">Lecture seule</option>
+          </Select>
+        </div>
+        <Button type="submit" variant="ghost">
+          Inviter
+        </Button>
+      </form>
+      {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
     </div>
   );
 }

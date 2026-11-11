@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../../config';
 import { PaymentsService } from '../payments/payments.service';
+import { EmailService } from '../email/email.service';
 import { OutboxService } from '../platform/outbox.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 
@@ -19,6 +20,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly outbox: OutboxService,
     private readonly payments: PaymentsService,
     private readonly webhooks: WebhooksService,
+    private readonly email: EmailService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -27,6 +29,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.every('webhook-retry', 30_000, () => this.webhooks.retryFailed());
     this.every('expire-requests', 60_000, () => this.payments.expireRequests());
     this.every('sync-stale-attempts', 60_000, () => this.payments.syncStaleAttempts());
+    this.every('send-emails', 5_000, () => this.email.processQueue());
     this.logger.log('background jobs started');
   }
 

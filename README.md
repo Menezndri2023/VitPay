@@ -44,13 +44,21 @@ Comptes de démonstration (mot de passe `Demo-Password-2026!`) :
 
 Pour essayer : Business → *Nouvelle demande* → ouvrir le lien → *Payer par carte* → page du **prestataire simulé** → *Payer — scénario succès*. La demande passe à « Payée », le reçu est disponible et l'écriture apparaît au ledger.
 
+### Pile complète en conteneurs (sandbox)
+
+```bash
+export APP_ENCRYPTION_KEY=$(openssl rand -base64 32)
+docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d --build
+# API 4710 · Pay 3710 · Business 3711 · Admin 3712 · e-mails capturés : http://localhost:8025 (Mailpit)
+```
+
 ## Tests
 
 ```bash
 pnpm --filter @vitpay/money test     # 9 tests (dont tests de propriétés)
-pnpm --filter @vitpay/api test       # 55 tests (unitaires + intégration sur PostgreSQL réel)
+pnpm --filter @vitpay/api test       # 61 tests (unitaires + intégration sur PostgreSQL réel)
 ./scripts/smoke.sh                   # parcours complet via les apps démarrées (API)
-pnpm --filter @vitpay/e2e test       # 5 tests navigateur (Playwright + Chrome)
+MAILPIT_URL=http://localhost:8025 pnpm --filter @vitpay/e2e test   # 6 tests navigateur (Playwright + Chrome)
 ```
 
 ## Documentation

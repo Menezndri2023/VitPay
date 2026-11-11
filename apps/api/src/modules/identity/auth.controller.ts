@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../../config';
 import { ZodPipe } from '../../common/zod.pipe';
 import { AuthService, LoginResult } from './auth.service';
+import { PasswordResetService } from './password-reset.service';
 import { AllowPendingMfa, Auth, ForAudience, Public } from './decorators';
 import { Audience, AuthContext, clientInfo, COOKIE_NAMES, VitpayRequest } from './session';
 
@@ -17,6 +18,8 @@ const Register = z.object({
   locale: z.enum(['fr', 'ar', 'en']).optional(),
 });
 const Login = z.object({ email: z.string().email().max(254), password: z.string().min(1).max(128) });
+const Forgot = z.object({ email: z.string().email().max(254) });
+const Reset = z.object({ token: z.string().min(20).max(100), password: z.string().min(1).max(128) });
 const Code = z.object({ code: z.string().regex(/^\d{6}$/) });
 const AdminSetup = z.object({ enrollmentToken: z.string().min(16).max(64) });
 const AdminEnable = Code.extend({ enrollmentToken: z.string().min(16).max(64) });
@@ -48,8 +51,31 @@ abstract class BaseAuthController {
 export class AuthController extends BaseAuthController {
   protected readonly audience = 'business' as const;
 
-  constructor(auth: AuthService, @Inject(APP_CONFIG) config: AppConfig) {
+  constructor(
+    auth: AuthService,
+    @Inject(APP_CONFIG) config: AppConfig,
+    private readonly resets: PasswordResetService,
+  ) {
     super(auth, config);
+  }
+
+  /** Réponse identique que le compte existe ou non (pas d'énumération). */
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @HttpCode(202)
+  @Post('password/forgot')
+  async forgot(@Body(new ZodPipe(Forgot)) body: z.infer<typeof Forgot>, @Req() req: VitpayRequest) {
+    await this.resets.request(body.email, clientInfo(req));
+    return { ok: true };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(200)
+  @Post('password/reset')
+  async reset(@Body(new ZodPipe(Reset)) body: z.infer<typeof Reset>, @Req() req: VitpayRequest) {
+    await this.resets.reset(body.token, body.password, clientInfo(req));
+    return { ok: true };
   }
 
   @Public()

@@ -146,6 +146,12 @@ export class AuthService {
     return { ...session, mfaRequired, mfaEnrollmentRequired };
   }
 
+  /** Session Business pour un utilisateur qui vient de prouver son identité (ex. invitation acceptée). */
+  async issueBusinessSession(userId: string, meta: ClientMeta): Promise<LoginResult> {
+    const s = await this.createSession(userId, 'business', true, meta);
+    return { ...s, mfaRequired: false, mfaEnrollmentRequired: false };
+  }
+
   private async createSession(userId: string, audience: Audience, mfaVerified: boolean, meta: ClientMeta) {
     const token = randomToken(32);
     const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS[audience] * 3600_000);

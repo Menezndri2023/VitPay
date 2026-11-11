@@ -10,6 +10,10 @@ x-api-env: &api-env
   PUBLIC_API_URL: http://localhost:4710
   PAY_BASE_URL: http://localhost:3710
   ALLOWED_ORIGINS: http://localhost:3710,http://localhost:3711,http://localhost:3712
+  BUSINESS_APP_URL: http://localhost:3711
+  # E-mails réels via SMTP, capturés par Mailpit (http://localhost:8025)
+  EMAIL_TRANSPORT: smtp
+  SMTP_URL: smtp://mailpit:1025
   MOCK_PSP_ENABLED: "true"
   PAYMENTS_LIVE_ENABLED: "false"
 

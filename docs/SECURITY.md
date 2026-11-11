@@ -6,6 +6,9 @@
 |---|---|---|
 | Mots de passe | argon2id (m = 19 MiB, t = 2), 12 caractères minimum, liste noire, temps constant si l'utilisateur est inconnu | `security.test.ts` |
 | Force brute | Verrouillage 15 min après 5 échecs ; limitation de débit par route (`@nestjs/throttler`) | `security.test.ts` |
+| Récupération de compte | Mot de passe oublié : réponse identique (pas d'énumération), jeton de 256 bits haché, 30 min, usage unique ; toutes les sessions révoquées ; comptes admin exclus (réinitialisation par un Super Admin) | `accounts.test.ts`, e2e |
+| E-mails | File asynchrone avec reprise ; corps (liens à jeton) **purgé après envoi** ; adresses masquées dans les journaux | `accounts.test.ts` |
+| Invitations | Jeton à usage unique (7 j), acceptation réservée à l'e-mail invité ; redirections `next` limitées aux chemins internes | `accounts.test.ts` |
 | Sessions | Jeton opaque de 256 bits, **seul le hash SHA-256 est stocké**, expiration 12 h (Business) / 4 h (Admin), révocation à la déconnexion | |
 | MFA | TOTP ; **obligatoire pour l'admin** (enrôlement forcé), secret chiffré AES-256-GCM | `admin.test.ts` |
 | Audiences | Cookies et sessions distincts Business / Admin : une session Business ne donne jamais accès à l'admin | `admin.test.ts` |

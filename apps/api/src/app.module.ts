@@ -7,6 +7,10 @@ import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health.controller';
 import { AdminController } from './modules/admin/admin.controller';
 import { AdminService } from './modules/admin/admin.service';
+import { EmailService } from './modules/email/email.service';
+import { PasswordResetService } from './modules/identity/password-reset.service';
+import { OrgInvitationsController, PublicInvitationsController } from './modules/organizations/invitations.controller';
+import { InvitationsService } from './modules/organizations/invitations.service';
 import { AdminBillingController, OrgBillingController } from './modules/billing/billing.controller';
 import { BillingService } from './modules/billing/billing.service';
 import { AdminAuthController, AuthController } from './modules/identity/auth.controller';
@@ -54,6 +58,8 @@ export class AppModule {
       AdminController,
       AdminBillingController,
       OrgBillingController,
+      OrgInvitationsController,
+      PublicInvitationsController,
     ];
     if (config.MOCK_PSP_ENABLED) controllers.push(MockPspController);
 
@@ -86,6 +92,9 @@ export class AppModule {
         NotificationsConsumer,
         AdminService,
         BillingService,
+        EmailService,
+        PasswordResetService,
+        InvitationsService,
         JobsService,
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: SecurityGuard },

@@ -18,6 +18,11 @@ const EnvSchema = z
       .refine((v) => Buffer.from(v, 'base64').length === 32, 'APP_ENCRYPTION_KEY must be 32 bytes base64'),
     PUBLIC_API_URL: z.string().url().default('http://localhost:4710'),
     PAY_BASE_URL: z.string().url().default('http://localhost:3710'),
+    /** URL de l'espace Business (liens dans les e-mails : invitation, réinitialisation). */
+    BUSINESS_APP_URL: z.string().url().default('http://localhost:3711'),
+    EMAIL_TRANSPORT: z.enum(['log', 'smtp']).default('log'),
+    SMTP_URL: z.string().optional(),
+    EMAIL_FROM: z.string().default('VITPAY <no-reply@vitpay.local>'),
     ALLOWED_ORIGINS: z.string().default('http://localhost:3710,http://localhost:3711,http://localhost:3712'),
     COOKIE_SECURE: bool.default('false'),
     WORKERS_ENABLED: bool.default('true'),
@@ -37,6 +42,9 @@ const EnvSchema = z
     }
     if (env.NODE_ENV === 'production' && !env.COOKIE_SECURE) {
       ctx.addIssue({ code: 'custom', path: ['COOKIE_SECURE'], message: 'Secure cookies are required in production' });
+    }
+    if (env.EMAIL_TRANSPORT === 'smtp' && !env.SMTP_URL) {
+      ctx.addIssue({ code: 'custom', path: ['SMTP_URL'], message: 'SMTP_URL is required when EMAIL_TRANSPORT=smtp' });
     }
     if (env.PAYMENTS_LIVE_ENABLED && !env.LEGAL_SIGNOFF_REF) {
       ctx.addIssue({

@@ -9,7 +9,8 @@ export default function MfaPage() {
   const { onSubmit, ErrorBox, Submit } = useSubmit(async (fd) => {
     try {
       await api('/v1/auth/mfa/verify', { method: 'POST', body: { code: String(fd.get('code') ?? '').trim() } });
-      router.push('/app');
+      const next = new URLSearchParams(window.location.search).get('next');
+      router.push(next && next.startsWith('/') && !next.startsWith('//') && !next.includes('\\') ? next : '/app');
     } catch {
       throw new Error('Code invalide.');
     }

@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Currency, formatMinor } from '@vitpay/money';
 import { Db } from '../../database/db.service';
+import { EmailService, layout } from '../email/email.service';
 import { OutboxEvent, OutboxService } from '../platform/outbox.service';
 
 /**
@@ -13,6 +14,7 @@ export class NotificationsConsumer implements OnModuleInit {
   constructor(
     private readonly db: Db,
     private readonly outbox: OutboxService,
+    private readonly email: EmailService,
   ) {}
 
   onModuleInit(): void {
@@ -34,6 +36,14 @@ export class NotificationsConsumer implements OnModuleInit {
         body(e.payload),
         JSON.stringify({ outboxId: e.id.toString(), aggregateId: e.aggregateId, ...e.payload }),
       ]);
+      // Copie par e-mail aux propriétaires (paiements reçus et litiges).
+      if (type === 'payment.succeeded' || type === 'dispute.opened') {
+        const owners = await tx.query<{ email: string }>(`SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.role = 'owner'`);
+        const text = body(e.payload);
+        for (const o of owners) {
+          await this.email.queue(tx, { orgId: e.orgId, to: o.email, template: type, subject: `VITPAY — ${title}`, text, html: layout(title, [text]) });
+        }
+      }
     });
   }
 }

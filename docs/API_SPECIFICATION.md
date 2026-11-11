@@ -13,6 +13,8 @@
 | POST | `/v1/auth/login` | `{email, password}` → `{mfaRequired}` |
 | POST | `/v1/auth/mfa/verify` · `/mfa/setup` · `/mfa/enable` | TOTP |
 | POST | `/v1/auth/logout` | |
+| POST | `/v1/auth/password/forgot` | `{email}` → 202 dans tous les cas (pas d'énumération) |
+| POST | `/v1/auth/password/reset` | `{token, password}` → révoque toutes les sessions |
 | GET | `/v1/auth/me` | Utilisateur, session, organisations |
 | POST | `/v1/admin/auth/login` · `/mfa/setup` · `/mfa/enable` · `/mfa/verify` · `/logout` · GET `/me` | Audience admin (MFA obligatoire) |
 
@@ -23,6 +25,7 @@
 | POST | `/kyb` | `{legalName, ice(15 chiffres), rc, address}` (`org:update`) |
 | GET / POST / DELETE | `/members`, `/members/:userId` | (`members:manage`) |
 | GET / POST | `/points-of-sale` | (`pos:manage`) |
+| GET / POST / DELETE | `/invitations`, `/invitations/:id` | Invitations par e-mail (`members:manage`) |
 | GET / POST / DELETE | `/providers`, `/providers/:accountId` | Comptes prestataires (`providers:manage`) |
 | POST 🔑 | `/payment-requests` | `{amount:"500.00", currency, description?, customerName?, customerContact?, expiresInHours?, posId?}` |
 | GET | `/payment-requests?status=&q=&before=&limit=&posId=` | Pagination par curseur (`nextCursor`) |
@@ -45,6 +48,9 @@
 | POST | `/v1/public/requests/:token/attempts` | `{method:"card"}` → `{checkoutUrl, attemptId}` |
 | GET | `/v1/public/requests/:token/status` | Statut (relecture serveur si une tentative est en cours) |
 | GET | `/v1/public/requests/:token/receipt.pdf` | Reçu (si payé) |
+
+## Invitations (public)
+`GET /v1/invitations/:token` · `POST /v1/invitations/:token/accept` (session Business, même e-mail) · `POST /v1/invitations/:token/register {fullName, password}`.
 
 ## Webhooks prestataires
 `POST /webhooks/providers/:providerCode/:accountId` : un endpoint par compte marchand (modèle A). Réponses : 200 `{status: accepted|duplicate}`, 400 si la signature est invalide.

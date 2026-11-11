@@ -123,3 +123,37 @@ test('responsive : page de paiement sans défilement horizontal en largeur mobil
   expect(overflow).toBe(false);
   await ctx.close();
 });
+
+test('mot de passe oublié : e-mail réel (SMTP → Mailpit) puis réinitialisation', async ({ page, request }) => {
+  test.skip(!process.env.MAILPIT_URL, 'MAILPIT_URL non défini (pile docker sandbox requise)');
+  const MAILPIT = process.env.MAILPIT_URL as string;
+  const email = `reset-${Date.now()}@vitpay.test`;
+  await request.post(`${BIZ}/api/v1/auth/register`, {
+    data: { email, password: 'E2e-Password-2026!', fullName: 'Reset E2E', organizationName: 'Org Reset' },
+    headers: { 'x-vitpay-csrf': '1' },
+  });
+  await page.goto(`${BIZ}/login`);
+  await page.getByRole('link', { name: 'Mot de passe oublié ?' }).click();
+  await page.getByLabel('E-mail').fill(email);
+  await page.getByRole('button', { name: 'Recevoir un lien' }).click();
+  await expect(page.getByText(/un lien de réinitialisation/)).toBeVisible();
+
+  // Lecture de l'e-mail dans Mailpit (envoyé par le worker via SMTP)
+  let link: string | undefined;
+  for (let i = 0; i < 30 && !link; i++) {
+    const list = await (await request.get(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`)).json();
+    const id = list.messages?.[0]?.ID;
+    if (id) {
+      const msg = await (await request.get(`${MAILPIT}/api/v1/message/${id}`)).json();
+      link = String(msg.Text).match(/(http:\/\/localhost:3711\/reset-password\?token=\S+)/)?.[1];
+    }
+    if (!link) await page.waitForTimeout(1000);
+  }
+  expect(link).toBeTruthy();
+  await page.goto(link as string);
+  await page.getByLabel('Nouveau mot de passe').fill('Brand-New-Pass-2026!');
+  await page.getByLabel('Confirmation').fill('Brand-New-Pass-2026!');
+  await page.getByRole('button', { name: 'Enregistrer' }).click();
+  await expect(page.getByText(/Mot de passe modifié/)).toBeVisible();
+  await shot(page, '13-reset-done');
+});
