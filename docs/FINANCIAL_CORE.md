@@ -89,6 +89,16 @@ Pour chaque ligne du rapport du prestataire, le résultat est `matched`, `missin
 - Toute anomalie ouvre un incident.
 - Rejouer un rapprochement n'a aucun effet sur le ledger (testé).
 
+## Commission VITPAY (facturation hors flux)
+
+La commission (`vitpay_fee_bps` par organisation, modifiable à quatre yeux) est calculée à la confirmation (`HALF_UP`) et inscrite au ledger miroir (`vitpay_fees` / `vitpay_fees_payable`). Elle est **facturée séparément** par des relevés de commissions :
+
+- Un relevé couvre une période (jours calendaires de Casablanca), une organisation, une devise et un mode (sandbox ou live).
+- Un paiement ne peut figurer que dans **un seul relevé actif** (index unique partiel) : réémettre la même période ne refacture rien.
+- Statuts : `issued` → `paid` (référence du règlement reçu) ou `void`. L'annulation rend les paiements de nouveau facturables.
+- Document **pro forma** tant que le format de facture et la TVA ne sont pas validés (COMPLIANCE E2).
+- **À décider (produit et juridique)** : la commission est-elle due sur un paiement remboursé ou perdu en litige ? Aujourd'hui, elle est maintenue.
+
 ## Tests
 
 - `packages/money` : 9 tests, dont des tests de propriétés (fast-check).

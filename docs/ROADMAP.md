@@ -22,5 +22,5 @@
 5. Observabilité : Sentry, OpenTelemetry, alertes sur les incidents critiques.
 6. ☑ Tests e2e navigateur (Playwright) : parcours complet, RTL, caisse, admin, mobile.
 7. Rotation des clés de chiffrement ; anti-rejeu TOTP ; limitation de débit distribuée.
-8. Facturation de la commission VITPAY (hors flux, modèle A).
+8. ☑ Relevés de commissions VITPAY (hors flux, pro forma) — format de facture définitif après E2.
 9. Infrastructure de déploiement (Terraform) selon le choix d'hébergement (CNDP).

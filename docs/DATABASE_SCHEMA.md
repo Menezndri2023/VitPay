@@ -43,4 +43,4 @@ provider_accounts 1─n webhook_inbox · payouts · reconciliation_runs 1─n re
 | `vitpay_app` | Requêtes d'une organisation : RLS stricte, **aucun moyen de contournement** ; pas d'UPDATE ni DELETE sur `journal_entries`, `postings`, `audit_log`, `users`, `incidents` ; aucun accès à `sessions`, `idempotency_keys`, `webhook_inbox`, `approval_requests`, `mock_psp` |
 | `vitpay_system` | Chemins transverses justifiés (authentification, page publique, webhooks, admin, workers) : `BYPASSRLS`, identifiants distincts, mêmes interdictions d'immuabilité |
 
-`audit_log`, `users`, `sessions`, `idempotency_keys`, `outbox_events`, `webhook_inbox` et `incidents` ne sont pas sous RLS. Ce sont des tables de plateforme, et tout accès Business y est filtré explicitement par organisation.
+`audit_log` (chaîne de hash globale) et `users` ne sont pas sous RLS : l'accès Business y est filtré explicitement par organisation. `sessions`, `idempotency_keys`, `webhook_inbox` et `approval_requests` ne sont accessibles qu'au rôle système.

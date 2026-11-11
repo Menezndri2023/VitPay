@@ -1,0 +1,62 @@
+# Pile complète conteneurisée en MODE SANDBOX (prestataire simulé, aucun paiement réel).
+# docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d --build
+# La configuration de production (hébergeur, secrets, TLS) dépend de la décision CNDP (docs/COMPLIANCE.md C2).
+x-api-env: &api-env
+  NODE_ENV: development # sandbox : le prestataire simulé est interdit en production
+  PORT: "4710"
+  DATABASE_URL: postgres://vitpay_app:dev_app_password_change_me@postgres:5432/vitpay
+  DATABASE_SYSTEM_URL: postgres://vitpay_system:dev_system_password_change_me@postgres:5432/vitpay
+  APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?générer avec openssl rand -base64 32}
+  PUBLIC_API_URL: http://localhost:4710
+  PAY_BASE_URL: http://localhost:3710
+  ALLOWED_ORIGINS: http://localhost:3710,http://localhost:3711,http://localhost:3712
+  MOCK_PSP_ENABLED: "true"
+  PAYMENTS_LIVE_ENABLED: "false"
+
+services:
+  migrate:
+    build: { context: ., dockerfile: infra/docker/api.Dockerfile }
+    image: vitpay/api:sandbox
+    command: ["node", "dist/src/database/migrate.cli.js"]
+    environment:
+      DATABASE_OWNER_URL: postgres://vitpay_owner:dev_owner_password_change_me@postgres:5432/vitpay
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    image: vitpay/api:sandbox
+    environment:
+      <<: *api-env
+      WORKERS_ENABLED: "false"
+    ports: ["4710:4710"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    image: vitpay/api:sandbox
+    environment:
+      <<: *api-env
+      WORKERS_ENABLED: "true"
+      PORT: "4711"
+      # Le worker appelle le prestataire simulé, hébergé par le conteneur api.
+      PUBLIC_API_URL: http://api:4710
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  pay:
+    build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: pay } }
+    environment: { PORT: "3710" }
+    ports: ["3710:3710"]
+    depends_on: [api]
+
+  business:
+    build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: business } }
+    environment: { PORT: "3711" }
+    ports: ["3711:3711"]
+    depends_on: [api]
+
+  admin:
+    build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: admin } }
+    environment: { PORT: "3712" }
+    ports: ["3712:3712"]
+    depends_on: [api]

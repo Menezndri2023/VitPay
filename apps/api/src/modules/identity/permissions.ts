@@ -13,13 +13,14 @@ export type OrgPermission =
   | 'requests:cancel'
   | 'refunds:create'
   | 'ledger:read'
-  | 'exports:read';
+  | 'exports:read'
+  | 'billing:read';
 
 const ORG_ROLE_PERMISSIONS: Record<OrgRole, readonly OrgPermission[]> = {
-  owner: ['org:read', 'org:update', 'members:manage', 'pos:manage', 'providers:manage', 'requests:create', 'requests:read', 'requests:cancel', 'refunds:create', 'ledger:read', 'exports:read'],
-  admin: ['org:read', 'org:update', 'pos:manage', 'providers:manage', 'requests:create', 'requests:read', 'requests:cancel', 'refunds:create', 'ledger:read', 'exports:read'],
+  owner: ['org:read', 'org:update', 'members:manage', 'pos:manage', 'providers:manage', 'requests:create', 'requests:read', 'requests:cancel', 'refunds:create', 'ledger:read', 'exports:read', 'billing:read'],
+  admin: ['org:read', 'org:update', 'pos:manage', 'providers:manage', 'requests:create', 'requests:read', 'requests:cancel', 'refunds:create', 'ledger:read', 'exports:read', 'billing:read'],
   cashier: ['org:read', 'requests:create', 'requests:read'],
-  viewer: ['org:read', 'requests:read', 'ledger:read', 'exports:read'],
+  viewer: ['org:read', 'requests:read', 'ledger:read', 'exports:read', 'billing:read'],
 };
 
 export function orgRoleHas(role: OrgRole, perm: OrgPermission): boolean {
@@ -46,21 +47,24 @@ export type AdminPermission =
   | 'approvals:decide'
   | 'webhooks:read'
   | 'webhooks:replay'
-  | 'reconciliation:run';
+  | 'reconciliation:run'
+  | 'billing:read'
+  | 'billing:manage';
 
 const ALL_ADMIN: readonly AdminPermission[] = [
   'dashboard:read', 'orgs:read', 'orgs:read_pii', 'orgs:suspend', 'kyb:decide', 'payments:read', 'audit:read',
   'incidents:read', 'incidents:manage', 'approvals:request', 'approvals:decide', 'webhooks:read', 'webhooks:replay', 'reconciliation:run',
+  'billing:read', 'billing:manage',
 ];
 
 const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRole, readonly AdminPermission[]> = {
   super_admin: ALL_ADMIN,
-  admin: ['dashboard:read', 'orgs:read', 'orgs:read_pii', 'orgs:suspend', 'payments:read', 'audit:read', 'incidents:read', 'incidents:manage', 'approvals:request', 'approvals:decide', 'webhooks:read'],
-  finance: ['dashboard:read', 'orgs:read', 'payments:read', 'incidents:read', 'incidents:manage', 'approvals:request', 'approvals:decide', 'reconciliation:run'],
+  admin: ['dashboard:read', 'orgs:read', 'orgs:read_pii', 'orgs:suspend', 'payments:read', 'audit:read', 'incidents:read', 'incidents:manage', 'approvals:request', 'approvals:decide', 'webhooks:read', 'billing:read'],
+  finance: ['dashboard:read', 'orgs:read', 'payments:read', 'incidents:read', 'incidents:manage', 'approvals:request', 'approvals:decide', 'reconciliation:run', 'billing:read', 'billing:manage'],
   compliance: ['dashboard:read', 'orgs:read', 'orgs:read_pii', 'orgs:suspend', 'kyb:decide', 'payments:read', 'audit:read', 'incidents:read', 'approvals:request', 'approvals:decide'],
   support: ['dashboard:read', 'orgs:read', 'payments:read', 'incidents:read'],
   technical: ['dashboard:read', 'orgs:read', 'incidents:read', 'incidents:manage', 'webhooks:read', 'webhooks:replay'],
-  auditor: ['dashboard:read', 'orgs:read', 'payments:read', 'audit:read', 'incidents:read', 'webhooks:read'],
+  auditor: ['dashboard:read', 'orgs:read', 'payments:read', 'audit:read', 'incidents:read', 'webhooks:read', 'billing:read'],
 };
 
 export function platformRoleHas(role: PlatformRole, perm: AdminPermission): boolean {

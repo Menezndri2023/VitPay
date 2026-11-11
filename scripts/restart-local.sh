@@ -11,7 +11,7 @@ for a in pay business admin; do
   port=$(grep -o 'start -p [0-9]*' "$ROOT/apps/$a/package.json" | awk '{print $3}')
   (cd "$ROOT/apps/$a" && NEXT_TELEMETRY_DISABLED=1 npx next build > "$LOGS/$a-build.log" 2>&1 && NEXT_TELEMETRY_DISABLED=1 nohup npx next start -p "$port" > "$LOGS/$a.log" 2>&1 &)
 done
-for _ in $(seq 1 60); do
+for _ in $(seq 1 240); do
   curl -sf -o /dev/null http://localhost:4710/health && curl -sf -o /dev/null http://localhost:3710/ \
     && curl -sf -o /dev/null http://localhost:3711/login && curl -sf -o /dev/null http://localhost:3712/login && { echo "✓ VITPAY prêt : API 4710 · Pay 3710 · Business 3711 · Admin 3712"; exit 0; }
   sleep 1

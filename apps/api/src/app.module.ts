@@ -7,6 +7,8 @@ import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health.controller';
 import { AdminController } from './modules/admin/admin.controller';
 import { AdminService } from './modules/admin/admin.service';
+import { AdminBillingController, OrgBillingController } from './modules/billing/billing.controller';
+import { BillingService } from './modules/billing/billing.service';
 import { AdminAuthController, AuthController } from './modules/identity/auth.controller';
 import { AuthService } from './modules/identity/auth.service';
 import { SecurityGuard } from './modules/identity/security.guard';
@@ -50,6 +52,8 @@ export class AppModule {
       PublicPaymentsController,
       WebhooksController,
       AdminController,
+      AdminBillingController,
+      OrgBillingController,
     ];
     if (config.MOCK_PSP_ENABLED) controllers.push(MockPspController);
 
@@ -81,6 +85,7 @@ export class AppModule {
         ReceiptsService,
         NotificationsConsumer,
         AdminService,
+        BillingService,
         JobsService,
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_GUARD, useClass: SecurityGuard },

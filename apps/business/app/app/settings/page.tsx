@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Alert, ApiError, Button, Card, Field, Select, StatusBadge } from '@vitpay/ui';
+import { Alert, ApiError, Button, Card, Field, formatMoney, MoneyView, Select, StatusBadge } from '@vitpay/ui';
 import { useOrg } from '../org-context';
 
 interface OrgInfo {
@@ -164,11 +164,47 @@ export default function SettingsPage() {
         <PosList />
       </Card>
 
+      {can('billing:read') && (
+        <Card title="Relevés de commissions VITPAY">
+          <StatementList />
+        </Card>
+      )}
+
       <Card title="Tarification">
         <p style={{ margin: 0 }}>
           Commission VITPAY : <strong>{(org.vitpayFeeBps / 100).toFixed(2)} %</strong> par paiement confirmé (facturée séparément). Les frais de votre prestataire s’appliquent selon votre contrat avec lui.
         </p>
       </Card>
+    </div>
+  );
+}
+
+function StatementList() {
+  const { orgApi, orgId } = useOrg();
+  const [list, setList] = useState<{ id: string; number: string; periodStart: string; periodEnd: string; fees: MoneyView; status: string }[] | null>(null);
+  useEffect(() => {
+    orgApi<typeof list>('/billing/statements').then(setList).catch(() => setList([]));
+  }, [orgApi]);
+  if (!list) return <p className="vp-muted">Chargement…</p>;
+  if (!list.length) return <p className="vp-muted">Aucun relevé pour le moment.</p>;
+  return (
+    <div className="vp-stack" style={{ gap: 6 }}>
+      {list.map((s) => (
+        <div key={s.id} className="vp-row vp-between">
+          <span>
+            <a href={`/api/v1/orgs/${orgId}/billing/statements/${s.id}/statement.pdf`} target="_blank" rel="noreferrer" className="vp-mono">
+              {s.number}
+            </a>{' '}
+            <span className="vp-muted vp-small">
+              {s.periodStart} → {s.periodEnd}
+            </span>
+          </span>
+          <span className="vp-row" style={{ gap: 8 }}>
+            <strong>{formatMoney(s.fees)}</strong>
+            <StatusBadge status={s.status === 'issued' ? 'pending' : s.status === 'paid' ? 'paid' : 'cancelled'} label={s.status === 'issued' ? 'à régler' : s.status === 'paid' ? 'réglé' : 'annulé'} />
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

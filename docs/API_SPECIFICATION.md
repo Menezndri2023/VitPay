@@ -36,6 +36,7 @@
 | GET | `/exports/payments.csv?from=&to=` | (`exports:read`) |
 | GET / POST | `/notifications`, `/notifications/read` | |
 | GET | `/audit` | Journal de l'organisation (`org:update`) |
+| GET | `/billing/statements`, `/billing/statements/:id/statement.pdf` | Relevés de commissions VITPAY (`billing:read`) |
 
 ## Public (payeur) — sans authentification, limité en débit
 | Méthode | Route | |
@@ -49,7 +50,7 @@
 `POST /webhooks/providers/:providerCode/:accountId` : un endpoint par compte marchand (modèle A). Réponses : 200 `{status: accepted|duplicate}`, 400 si la signature est invalide.
 
 ## Admin — `/v1/admin` (audience admin + MFA)
-`GET dashboard` · `GET organizations[?q&status]` · `GET organizations/:id` · `POST organizations/:id/suspend {reason}` · `POST organizations/:id/kyb {decision, reason}` · `POST approvals {action, targetId, payload, reason}` · `GET approvals` · `POST approvals/:id/decision {decision, note}` · `GET payments[?q&status&orgId]` · `GET audit[?orgId&action&before]` · `GET audit/verify` · `GET incidents` · `POST incidents/:id/resolve {note}` · `GET webhooks` · `POST webhooks/:id/replay` · `GET provider-accounts` · `GET|POST reconciliation/runs {providerAccountId, date}`.
+`GET dashboard` · `GET organizations[?q&status]` · `GET organizations/:id` · `POST organizations/:id/suspend {reason}` · `POST organizations/:id/kyb {decision, reason}` · `POST approvals {action, targetId, payload, reason}` · `GET approvals` · `POST approvals/:id/decision {decision, note}` · `GET payments[?q&status&orgId]` · `GET audit[?orgId&action&before]` · `GET audit/verify` · `GET incidents` · `POST incidents/:id/resolve {note}` · `GET webhooks` · `POST webhooks/:id/replay` · `GET provider-accounts` · `GET|POST reconciliation/runs {providerAccountId, date}` · `GET|POST billing/statements {periodStart, periodEnd, mode, orgId?}` · `POST billing/statements/:id/paid {reference}` · `POST billing/statements/:id/void {reason}`.
 
 ## Prestataire simulé (sandbox uniquement) — `/mock-psp`
 `POST api/merchants` · `POST api/payments` · `GET api/payments/:id` · `POST api/payments/:id/refunds` · `GET api/refunds/:id` · `GET api/disputes/:id` · `GET api/settlements?date=` · `GET checkout/:id` · `POST checkout/:id/{succeed|decline|challenge|cancel}` · `POST simulate/payments/:id/dispute` · `POST simulate/disputes/:id/{won|lost}`.

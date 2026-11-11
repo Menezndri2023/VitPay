@@ -137,3 +137,49 @@ describe('VITPAY ADMIN', () => {
     expect(v.body.ok).toBe(true);
   });
 });
+
+describe('relevés de commissions (facturation hors flux)', () => {
+  let ctx: TestCtx;
+
+  beforeAll(async () => {
+    ctx = await startApp();
+  });
+  afterAll(async () => ctx.close());
+
+  it('émission, idempotence, PDF, annulation puis ré-émission, encaissement', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'billing@admin.test', 'Org Facturée');
+    await connectMock(s, orgId);
+    const root = await adminSession(ctx, 'root@admin.test');
+    const fin = await adminSession(ctx, 'fin@admin.test');
+    // Commission 2 % (validée à quatre yeux)
+    const ar = await root.post('/v1/admin/approvals', { action: 'org.fee.update', targetId: orgId, payload: { vitpayFeeBps: 200 }, reason: 'Grille pilote' });
+    await fin.post(`/v1/admin/approvals/${ar.body.id}/decision`, { decision: 'approved', note: 'Validé' });
+    for (const amount of ['100.00', '250.00']) {
+      const r = await createRequest(s, orgId, amount);
+      await payerActs(ctx, tokenOf(r.payUrl), 'succeed');
+    }
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Casablanca' }).format(new Date());
+    const body = { periodStart: day, periodEnd: day, mode: 'sandbox', orgId };
+    // Le support ne peut pas émettre
+    expect((await (await adminSession(ctx, 'support@admin.test')).post('/v1/admin/billing/statements', body)).status).toBe(403);
+    const issued = await fin.post('/v1/admin/billing/statements', body);
+    expect(issued.status).toBe(201);
+    expect(issued.body.issued).toHaveLength(1);
+    const st = issued.body.issued[0];
+    expect(st.fees.minor).toBe('700'); // 2 % de 350,00 MAD
+    expect(st.number).toMatch(/^TEST-VPC-/);
+    // Rejouer l'émission ne refacture rien
+    expect((await fin.post('/v1/admin/billing/statements', body)).body.issued).toHaveLength(0);
+    // Le commerçant voit son relevé (lecture seule) et le PDF
+    const mine = await s.get(`/v1/orgs/${orgId}/billing/statements`);
+    expect(mine.body.map((x: { id: string }) => x.id)).toContain(st.id);
+    const pdf = await s.get(`/v1/orgs/${orgId}/billing/statements/${st.id}/statement.pdf`);
+    expect(pdf.headers['content-type']).toContain('application/pdf');
+    // Annulation → les paiements redeviennent facturables
+    expect((await fin.post(`/v1/admin/billing/statements/${st.id}/void`, { reason: 'Erreur de période' })).status).toBe(200);
+    const again = await fin.post('/v1/admin/billing/statements', body);
+    expect(again.body.issued[0].fees.minor).toBe('700');
+    expect((await fin.post(`/v1/admin/billing/statements/${again.body.issued[0].id}/paid`, { reference: 'VIR-2026-0001' })).status).toBe(200);
+    expect((await fin.post(`/v1/admin/billing/statements/${again.body.issued[0].id}/void`, { reason: 'Trop tard' })).status).toBe(409);
+  });
+});

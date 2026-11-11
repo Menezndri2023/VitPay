@@ -12,6 +12,7 @@ const NAV = [
   { href: '/console/incidents', label: 'Incidents' },
   { href: '/console/approvals', label: 'Validations (4 yeux)' },
   { href: '/console/reconciliation', label: 'Rapprochement' },
+  { href: '/console/billing', label: 'Commissions' },
   { href: '/console/webhooks', label: 'Webhooks' },
   { href: '/console/audit', label: 'Journal d’audit' },
 ];
