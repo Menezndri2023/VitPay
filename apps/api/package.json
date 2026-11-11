@@ -21,7 +21,7 @@
     "@vitpay/money": "workspace:*",
     "cookie-parser": "^1.4.7",
     "helmet": "^8.0.0",
-    "nodemailer": "^6.10.1",
+    "nodemailer": "^10.5.0",
     "otplib": "^12.0.1",
     "pdfkit": "^0.15.2",
     "pg": "^8.13.1",
@@ -29,7 +29,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "undici": "^7.30.2",
-    "zod": "^3.24.1"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@swc-node/register": "^1.10.9",
@@ -37,7 +37,7 @@
     "@types/cookie-parser": "^1.4.8",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
-    "@types/nodemailer": "^6.4.24",
+    "@types/nodemailer": "^8.0.2",
     "@types/pdfkit": "^0.13.8",
     "@types/pg": "^8.11.10",
     "@types/qrcode": "^1.5.5",

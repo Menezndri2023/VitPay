@@ -39,16 +39,16 @@ const EnvSchema = z
     SMTP_URL: z.string().optional(),
     EMAIL_FROM: z.string().default('VITPAY <no-reply@vitpay.local>'),
     ALLOWED_ORIGINS: z.string().default('http://localhost:3710,http://localhost:3711,http://localhost:3712'),
-    COOKIE_SECURE: bool.default('false'),
-    WORKERS_ENABLED: bool.default('true'),
-    MOCK_PSP_ENABLED: bool.default('true'),
+    COOKIE_SECURE: bool.prefault('false'),
+    WORKERS_ENABLED: bool.prefault('true'),
+    MOCK_PSP_ENABLED: bool.prefault('true'),
     /** Webhooks sortants vers des adresses privées/HTTP (développement uniquement). */
-    ALLOW_PRIVATE_WEBHOOK_URLS: bool.default('false'),
+    ALLOW_PRIVATE_WEBHOOK_URLS: bool.prefault('false'),
     /**
      * Garde-fou réglementaire (règles absolues 10 et 18) : aucune transaction réelle
      * tant que la validation juridique n'est pas formalisée.
      */
-    PAYMENTS_LIVE_ENABLED: bool.default('false'),
+    PAYMENTS_LIVE_ENABLED: bool.prefault('false'),
     LEGAL_SIGNOFF_REF: z.string().optional(),
     PAYMENT_REQUEST_DEFAULT_TTL_HOURS: z.coerce.number().int().positive().default(72),
     /** Jeton d'accès à /health/metrics (absent = endpoint désactivé). */

@@ -8,3 +8,8 @@ allowBuilds:
   '@node-rs/argon2': true
   esbuild: true
   sharp: true
+
+# P2 (audit du 11/11/2026) : Next 15.5.x fige postcss 8.4.31 (vulnérabilités connues) ;
+# version corrigée de la même série majeure imposée.
+overrides:
+  postcss: ^8.5.32

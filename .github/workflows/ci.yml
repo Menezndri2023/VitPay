@@ -24,6 +24,9 @@ jobs:
           --health-interval 3s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Historique complet : gitleaks analyse tous les commits de la PR (P1).
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -39,6 +42,11 @@ jobs:
         run: |
           pnpm --filter @vitpay/api typecheck
           pnpm --filter @vitpay/ui typecheck
+          pnpm --filter @vitpay/pay exec tsc --noEmit
+          pnpm --filter @vitpay/business exec tsc --noEmit
+          pnpm --filter @vitpay/admin exec tsc --noEmit
+      - name: Dépendances sans vulnérabilité élevée ou critique
+        run: pnpm audit --prod --audit-level high
       - name: Tests
         run: |
           pnpm --filter @vitpay/money test

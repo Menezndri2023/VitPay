@@ -19,7 +19,7 @@ const ConnectProvider = z.object({
   providerCode: z.string().min(1).max(40),
   mode: z.enum(['sandbox', 'live']),
   label: z.string().max(80).optional(),
-  credentials: z.record(z.string().max(500)).optional(),
+  credentials: z.record(z.string(), z.string().max(500)).optional(),
   webhookSecret: z.string().max(500).optional(),
 });
 

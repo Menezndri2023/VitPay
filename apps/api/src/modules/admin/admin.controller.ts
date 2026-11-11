@@ -11,7 +11,7 @@ const Kyb = z.object({ decision: z.enum(['verified', 'rejected']), reason: z.str
 const Approval = z.object({
   action: z.enum(['org.fee.update', 'org.reactivate']),
   targetId: UUID,
-  payload: z.record(z.unknown()).default({}),
+  payload: z.record(z.string(), z.unknown()).default({}),
   reason: z.string().trim().min(5).max(500),
 });
 const Decision = z.object({ decision: z.enum(['approved', 'rejected']), note: z.string().trim().min(3).max(500) });
