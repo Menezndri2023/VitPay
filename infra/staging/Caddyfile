@@ -1,0 +1,65 @@
+# VITPAY STAGING — Caddy : HTTPS automatique (Let's Encrypt, repli ZeroSSL), seul point d'entrée.
+# Domaine temporaire sans achat : <ip-avec-tirets>.sslip.io (ex. 203-0-113-10.sslip.io).
+{
+	{$CADDY_GLOBAL_EXTRA}
+}
+
+(common) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+	# Pas de journal d'accès Caddy : les chemins contiennent des jetons (liens de paiement, invitations).
+	# Le journal d'accès de l'API est expurgé de ces jetons (docs/SECURITY.md).
+}
+
+# Proxy : l'adresse réelle du client remplace tout X-Forwarded-For envoyé par le client.
+(upstream_headers) {
+	header_up X-Forwarded-For {remote_host}
+	header_up X-Real-IP {remote_host}
+}
+
+# Outils bruts du prestataire simulé : jamais exposés publiquement (l'espace Business passe par
+# un endpoint authentifié). Seules la page de paiement hébergée et sa résolution restent publiques.
+(block_mock_tools) {
+	@mock_tools path /api/mock-psp/* /mock-psp/api/* /mock-psp/simulate/disputes/* /mock-psp/simulate/payments/*/dispute
+	respond @mock_tools 404
+}
+
+pay.{$STAGING_DOMAIN_SUFFIX} {
+	import common
+	import block_mock_tools
+	reverse_proxy pay:3710 {
+		import upstream_headers
+	}
+}
+
+app.{$STAGING_DOMAIN_SUFFIX} {
+	import common
+	import block_mock_tools
+	reverse_proxy business:3711 {
+		import upstream_headers
+	}
+}
+
+# Console d'administration : authentification HTTP en plus de la connexion VITPAY avec MFA.
+admin.{$STAGING_DOMAIN_SUFFIX} {
+	import common
+	import block_mock_tools
+	basic_auth {
+		{$ADMIN_BASIC_AUTH_USER} {$ADMIN_BASIC_AUTH_HASH}
+	}
+	reverse_proxy admin:3712 {
+		import upstream_headers
+	}
+}
+
+api.{$STAGING_DOMAIN_SUFFIX} {
+	import common
+	import block_mock_tools
+	reverse_proxy api:4710 {
+		import upstream_headers
+	}
+}
