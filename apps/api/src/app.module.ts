@@ -10,6 +10,7 @@ import { AdminService } from './modules/admin/admin.service';
 import { DevelopersController } from './modules/developers/developers.controller';
 import { DevelopersService } from './modules/developers/developers.service';
 import { EmailService } from './modules/email/email.service';
+import { EmailVerificationService } from './modules/identity/email-verification.service';
 import { PasswordResetService } from './modules/identity/password-reset.service';
 import { OrgInvitationsController, PublicInvitationsController } from './modules/organizations/invitations.controller';
 import { InvitationsService } from './modules/organizations/invitations.service';
@@ -101,6 +102,7 @@ export class AppModule {
         BillingService,
         EmailService,
         PasswordResetService,
+        EmailVerificationService,
         InvitationsService,
         KybDocumentsService,
         DevelopersService,

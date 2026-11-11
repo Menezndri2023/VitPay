@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { api, Logo } from '@vitpay/ui';
 import { OrgProvider, useOrg } from './org-context';
@@ -14,6 +14,32 @@ const NAV = [
   { href: '/app/developers', label: 'Développeurs' },
   { href: '/app/settings', label: 'Paramètres' },
 ];
+
+function VerifyEmailBanner({ email }: { email: string }) {
+  const [state, setState] = useState<'idle' | 'sent' | 'error'>('idle');
+  const resend = async () => {
+    try {
+      await api('/v1/auth/email/resend', { method: 'POST' });
+      setState('sent');
+    } catch {
+      setState('error');
+    }
+  };
+  return (
+    <div className="vp-alert vp-alert-warning" style={{ marginBottom: 16 }} role="status">
+      Confirmez votre adresse <strong>{email}</strong> avec le lien reçu par e-mail. D’ici là, la connexion d’un prestataire, l’équipe, les intégrations et le dossier KYB restent bloqués.{' '}
+      {state === 'sent' ? (
+        <span>Nouveau lien envoyé.</span>
+      ) : state === 'error' ? (
+        <span>Envoi impossible pour l’instant, réessayez plus tard.</span>
+      ) : (
+        <button type="button" onClick={resend} style={{ background: 'none', border: 0, padding: 0, color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}>
+          Renvoyer le lien
+        </button>
+      )}
+    </div>
+  );
+}
 
 function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -52,6 +78,7 @@ function Shell({ children }: { children: ReactNode }) {
         </button>
       </nav>
       <main className="vp-main">
+        {!me.user.emailVerified && <VerifyEmailBanner email={me.user.email} />}
         {org.status !== 'active' && (
           <div className="vp-alert vp-alert-danger" style={{ marginBottom: 16 }}>
             Votre organisation est suspendue. Les nouvelles opérations sont bloquées. Contactez le support VITPAY.

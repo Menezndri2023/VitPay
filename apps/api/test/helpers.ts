@@ -90,9 +90,25 @@ function cookieFrom(res: request.Response): string {
   return set.map((c) => c.split(';')[0]).join('; ');
 }
 
-export async function registerMerchant(ctx: TestCtx, email: string, orgName = 'Boutique Test'): Promise<{ s: Session; orgId: string }> {
+/** Jeton du dernier lien de vérification mis en file pour cette adresse (e-mail non encore envoyé). */
+export async function verificationToken(email: string): Promise<string> {
+  const rows = await ownerQuery<{ text_body: string }>(
+    `SELECT text_body FROM outbound_emails WHERE to_address = $1 AND template = 'email_verification' AND text_body IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+    [email.toLowerCase()],
+  );
+  const token = rows[0]?.text_body.match(/verify-email\?token=([A-Za-z0-9_%-]+)/)?.[1];
+  if (!token) throw new Error(`no verification email for ${email}`);
+  return decodeURIComponent(token);
+}
+
+/** Inscription d'un commerçant ; par défaut, suit le lien de vérification reçu par e-mail. */
+export async function registerMerchant(ctx: TestCtx, email: string, orgName = 'Boutique Test', opts: { verify?: boolean } = {}): Promise<{ s: Session; orgId: string }> {
   const res = await ctx.api().post('/v1/auth/register').send({ email, password: PASSWORD, fullName: 'Test Owner', organizationName: orgName });
   if (res.status !== 201) throw new Error(`register failed ${res.status} ${JSON.stringify(res.body)}`);
+  if (opts.verify !== false) {
+    const v = await ctx.api().post('/v1/auth/email/verify').send({ token: await verificationToken(email) });
+    if (v.status !== 200) throw new Error(`verify failed ${v.status} ${JSON.stringify(v.body)}`);
+  }
   return { s: new Session(ctx, cookieFrom(res)), orgId: res.body.organizationId };
 }
 

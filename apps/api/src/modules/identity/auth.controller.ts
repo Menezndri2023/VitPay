@@ -6,6 +6,7 @@ import { APP_CONFIG, AppConfig } from '../../config';
 import { ZodPipe } from '../../common/zod.pipe';
 import { AuthService, LoginResult } from './auth.service';
 import { PasswordResetService } from './password-reset.service';
+import { EmailVerificationService } from './email-verification.service';
 import { AllowPendingMfa, Auth, ForAudience, Public } from './decorators';
 import { Audience, AuthContext, clientInfo, COOKIE_NAMES, VitpayRequest } from './session';
 
@@ -19,6 +20,7 @@ const Register = z.object({
 });
 const Login = z.object({ email: z.string().email().max(254), password: z.string().min(1).max(128) });
 const Forgot = z.object({ email: z.string().email().max(254) });
+const VerifyEmail = z.object({ token: z.string().min(20).max(100) });
 const Reset = z.object({ token: z.string().min(20).max(100), password: z.string().min(1).max(128) });
 const Code = z.object({ code: z.string().regex(/^\d{6}$/) });
 const AdminSetup = z.object({ enrollmentToken: z.string().min(16).max(64) });
@@ -55,6 +57,7 @@ export class AuthController extends BaseAuthController {
     auth: AuthService,
     @Inject(APP_CONFIG) config: AppConfig,
     private readonly resets: PasswordResetService,
+    private readonly verification: EmailVerificationService,
   ) {
     super(auth, config);
   }
@@ -77,6 +80,24 @@ export class AuthController extends BaseAuthController {
   @Post('password/reset')
   async reset(@Body(new ZodPipe(Reset)) body: z.infer<typeof Reset>, @Req() req: VitpayRequest) {
     await this.resets.reset(body.token, body.password, clientInfo(req));
+    return { ok: true };
+  }
+
+  /** Le jeton suffit (lien ouvert éventuellement sur un autre appareil que celui de l'inscription). */
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(200)
+  @Post('email/verify')
+  async verifyEmail(@Body(new ZodPipe(VerifyEmail)) body: z.infer<typeof VerifyEmail>, @Req() req: VitpayRequest) {
+    await this.verification.verify(body.token, clientInfo(req));
+    return { ok: true };
+  }
+
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @HttpCode(202)
+  @Post('email/resend')
+  async resendVerification(@Auth() a: AuthContext, @Req() req: VitpayRequest) {
+    await this.verification.resend(a, clientInfo(req));
     return { ok: true };
   }
 

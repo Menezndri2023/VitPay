@@ -61,12 +61,28 @@ VitPay-Signature: t=1731250000,v1=5f2b…
 import crypto from 'node:crypto';
 
 export function verifyVitpay(rawBody, header, secret, toleranceSec = 300) {
-  const { t, v1 } = Object.fromEntries(header.split(',').map((p) => p.split('=')));
-  if (Math.abs(Date.now() / 1000 - Number(t)) > toleranceSec) return false; // anti-rejeu
-  const expected = crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(v1, 'hex'));
+  const parts = header.split(',').map((p) => p.split('='));
+  const t = parts.find(([k]) => k === 't')?.[1];
+  // Pendant une rotation de secret, l'en-tête contient plusieurs valeurs v1 : une seule doit correspondre.
+  const signatures = parts.filter(([k]) => k === 'v1').map(([, v]) => v);
+  if (!t || Math.abs(Date.now() / 1000 - Number(t)) > toleranceSec) return false; // anti-rejeu
+  const expected = Buffer.from(crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest('hex'), 'hex');
+  return signatures.some((v1) => {
+    const got = Buffer.from(v1, 'hex');
+    return got.length === expected.length && crypto.timingSafeEqual(expected, got);
+  });
 }
 ```
+
+### Changer le secret (rotation)
+
+> ⚠️ **Changement du 11/11/2026 pour les intégrations existantes.** L'en-tête peut désormais contenir **plusieurs** valeurs `v1`. Un code qui ne lit qu'une seule valeur (par ex. `Object.fromEntries(header.split(','))`, qui garde la dernière) échouera pendant une rotation. Mettez à jour votre vérification avec l'extrait ci-dessus **avant** de changer le secret.
+
+**Développeurs → Webhooks → Changer le secret** (ou `POST /v1/orgs/:orgId/developers/webhooks/:id/rotate-secret`, body `{"overlapHours": 24}`) :
+
+- Le nouveau secret est affiché une seule fois et signe immédiatement.
+- Pendant la période de recouvrement (24 h par défaut, 168 h au plus), chaque requête porte **deux** valeurs `v1` : une avec le nouveau secret, une avec l'ancien. Déployez le nouveau secret côté serveur pendant cette fenêtre, sans interruption.
+- En cas de fuite, utilisez `overlapHours: 0` : l'ancien secret cesse immédiatement de signer.
 
 Bonnes pratiques :
 

@@ -9,6 +9,7 @@ import { DevelopersService, WEBHOOK_EVENTS } from './developers.service';
 
 const UUID = z.string().uuid();
 const CreateKey = z.object({ name: z.string().trim().min(2).max(60), scopes: z.array(z.string()).min(1).max(10) });
+const Rotate = z.object({ overlapHours: z.number().int().min(0).max(168).default(24) });
 const CreateEndpoint = z.object({ url: z.string().max(500), events: z.array(z.string()).min(1).max(20) });
 
 /** Gestion des intégrations (réservé aux sessions humaines owner/admin : une clé API ne peut pas créer de clé). */
@@ -51,6 +52,15 @@ export class DevelopersController {
   @Post('webhooks')
   createEndpoint(@Org() org: OrgContext, @Auth() a: AuthContext, @Body(new ZodPipe(CreateEndpoint)) b: z.infer<typeof CreateEndpoint>, @Req() req: VitpayRequest) {
     return this.dev.createEndpoint(org.orgId, { type: 'user', ...actorOf(a, req) }, b);
+  }
+
+  /** Rotation du secret de signature (overlapHours = 0 : révocation immédiate de l'ancien, ex. fuite). */
+  @RequireOrgPermission('developers:manage')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(200)
+  @Post('webhooks/:id/rotate-secret')
+  rotate(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('id', new ZodPipe(UUID)) id: string, @Body(new ZodPipe(Rotate)) b: z.infer<typeof Rotate>, @Req() req: VitpayRequest) {
+    return this.dev.rotateSecret(org.orgId, { type: 'user', ...actorOf(a, req) }, id, b.overlapHours);
   }
 
   @RequireOrgPermission('developers:manage')

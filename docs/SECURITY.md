@@ -11,6 +11,8 @@
 | Justificatifs KYB | Chiffrés AES-256-GCM au repos + empreinte SHA-256 vérifiée à la lecture ; type réel détecté par signature (PDF/PNG/JPEG), taille ≤ 5 Mo, nom de fichier assaini ; non modifiables par le commerçant ; consultation conformité **journalisée** | `admin.test.ts`, e2e |
 | Clés API | Clé 256 bits affichée une fois, **seule l'empreinte stockée** ; périmètres limités, organisation unique, jamais d'accès admin ni gestion des clés ; révocation immédiate ; actions journalisées `api_key` | `developers.test.ts`, e2e |
 | Webhooks sortants (SSRF) | HTTPS obligatoire en production ; adresses privées, loopback, link-local, métadonnées cloud refusées **à la connexion** (anti DNS rebinding) ; pas de redirection suivie ; délai 10 s ; signature HMAC + horodatage | `developers.test.ts` |
+| Vérification e-mail | Lien à jeton haché (48 h, usage unique, dernier envoi seul valide, 3 envois/h) ; tant qu'elle manque : connexion d'un prestataire, équipe, intégrations, dossier KYB et remboursements refusés (`email_not_verified`) ; les liens de réinitialisation et d'invitation valent aussi vérification | `accounts.test.ts` |
+| Rotation secret webhook | Nouveau secret affiché une fois ; ancien accepté pendant un recouvrement (0 à 168 h, double `v1`) ; rotation d'urgence immédiate ; journalisée | `developers.test.ts` |
 | Invitations | Jeton à usage unique (7 j), acceptation réservée à l'e-mail invité ; redirections `next` limitées aux chemins internes | `accounts.test.ts` |
 | Sessions | Jeton opaque de 256 bits, **seul le hash SHA-256 est stocké**, expiration 12 h (Business) / 4 h (Admin), révocation à la déconnexion | |
 | MFA | TOTP ; **obligatoire pour l'admin** (enrôlement forcé), secret chiffré AES-256-GCM | `admin.test.ts` |
@@ -71,7 +73,20 @@ Durcissements associés :
 - Les jetons de 20 caractères et plus sont masqués dans les journaux.
 - La date de dernière utilisation d'une clé API n'est mise à jour qu'une fois par minute.
 
-Points ouverts : vérification de l'adresse e-mail à l'inscription (pré-enregistrement d'un compte au nom d'une victime) ; rotation des secrets de signature des webhooks ; exiger un KYB vérifié avant les invitations en mode réel (décision produit).
+Points ouverts : exiger un KYB vérifié avant les invitations en mode réel (décision produit) ; rotation de la clé de chiffrement `APP_ENCRYPTION_KEY` (rechiffrement des secrets) ; risque résiduel de pré-enregistrement : un compte non vérifié au nom d'une victime bloque son adresse — la victime le récupère par « mot de passe oublié », mais l'organisation créée par l'usurpateur reste rattachée (procédure support à définir : purge des comptes non vérifiés après 7 jours).
+
+## Troisième revue indépendante (11/11/2026) — vérification e-mail et rotation des secrets
+
+| # | Défaut | Correction |
+|---|---|---|
+| R3-1 | **Élevé** — un compte Business créé par un tiers (mot de passe et MFA choisis par lui) pouvait être promu administrateur par le CLI s'il portait l'adresse visée | Le CLI refuse toute promotion d'un compte non administrateur ; adresse dédiée obligatoire (`admin.test.ts`) |
+| R3-2 | Un vérificateur de signature ne lisant qu'une valeur `v1` échoue pendant une rotation | Avertissement dans l'interface avant rotation + note de changement dans `DEVELOPERS.md` |
+| R3-3 | Un compte non vérifié pouvait lier une MFA et verrouiller le vrai titulaire de l'adresse | MFA refusée tant que l'adresse n'est pas confirmée ; MFA retirée lors d'une réinitialisation d'un compte jamais vérifié |
+| R3-4 | Accepter une invitation connecté ne valait pas vérification | L'acceptation marque l'adresse vérifiée (`accounts.test.ts`) |
+| R3-5 | Anciens secrets de webhook expirés conservés | Effacés par le worker après expiration et à la désactivation |
+| R3-6 | Page de confirmation validée à l'ouverture (analyseurs de liens des messageries) | Confirmation par clic explicite (e2e) |
+| R3-7 | Deux rotations simultanées : le premier secret remis devenait « ancien » | Seconde rotation refusée (409) pendant 10 s |
+| R3-8 | Le rôle applicatif pouvait insérer un jeton de vérification pour n'importe quel compte | Jeton créé par le rôle système après l'inscription ; droit retiré (migration 014) |
 
 ## À faire avant la production
 

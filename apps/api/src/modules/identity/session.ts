@@ -21,6 +21,8 @@ export interface AuthContext {
   audience: Audience;
   mfaVerified: boolean;
   mfaEnabled: boolean;
+  /** Adresse e-mail confirmée (lien reçu). Exigée pour les opérations sensibles. */
+  emailVerified: boolean;
   platformRole: PlatformRole | null;
   /** Défini si la requête est authentifiée par une clé API (API publique Business). */
   apiKeyId?: string;

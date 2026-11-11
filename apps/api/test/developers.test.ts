@@ -117,6 +117,52 @@ describe('API publique : clés API et webhooks sortants', () => {
     }
   });
 
+  it('rotation du secret : double signature pendant le recouvrement, ancien secret refusé ensuite', async () => {
+    const r = await receiver(200);
+    const sigs = (got: Received) => [...String(got.headers['vitpay-signature']).matchAll(/v1=([0-9a-f]+)/g)].map((m) => m[1]);
+    const ts = (got: Received) => /t=(\d+)/.exec(String(got.headers['vitpay-signature']))?.[1];
+    try {
+      const ep = await s.post(`/v1/orgs/${orgId}/developers/webhooks`, { url: r.url, events: ['payment.succeeded'] });
+      const oldSecret = ep.body.secret as string;
+      const rot = await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/rotate-secret`, { overlapHours: 24 });
+      expect(rot.status).toBe(200);
+      const newSecret = rot.body.secret as string;
+      expect(newSecret).toMatch(/^whsec_/);
+      expect(newSecret).not.toBe(oldSecret);
+      expect(JSON.stringify((await s.get(`/v1/orgs/${orgId}/developers/webhooks`)).body)).not.toContain(newSecret);
+
+      await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/test`);
+      await dev.deliverDue();
+      const first = r.received.at(-1) as Received;
+      expect(sigs(first)).toEqual([hmacSha256Hex(newSecret, `${ts(first)}.${first.body}`), hmacSha256Hex(oldSecret, `${ts(first)}.${first.body}`)]);
+
+      // Fin du recouvrement : seul le nouveau secret signe.
+      await ownerQuery(`UPDATE webhook_endpoints SET previous_secret_expires_at = now() - interval '1 second' WHERE id = $1`, [ep.body.id]);
+      await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/test`);
+      await dev.deliverDue();
+      const second = r.received.at(-1) as Received;
+      expect(sigs(second)).toEqual([hmacSha256Hex(newSecret, `${ts(second)}.${second.body}`)]);
+
+      // Deux rotations rapprochées : la seconde est refusée (le secret remis à la première resterait « ancien »).
+      expect((await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/rotate-secret`, { overlapHours: 24 })).status).toBe(409);
+      await ownerQuery(`UPDATE webhook_endpoints SET secret_rotated_at = now() - interval '1 minute' WHERE id = $1`, [ep.body.id]);
+      // Les anciens secrets expirés sont effacés de la base.
+      expect((await ownerQuery<{ p: string | null }>(`SELECT previous_secret_enc AS p FROM webhook_endpoints WHERE id = $1`, [ep.body.id]))[0]?.p).toBeNull();
+
+      // Rotation d'urgence (fuite) : l'ancien secret cesse immédiatement de signer.
+      const urgent = await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/rotate-secret`, { overlapHours: 0 });
+      expect(urgent.body.previousSecretExpiresAt).toBeNull();
+      await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/test`);
+      await dev.deliverDue();
+      const third = r.received.at(-1) as Received;
+      expect(sigs(third)).toEqual([hmacSha256Hex(urgent.body.secret, `${ts(third)}.${third.body}`)]);
+      const audit = await ownerQuery(`SELECT 1 FROM audit_log WHERE action = 'developers.webhook_secret_rotated' AND target_id = $1`, [ep.body.id]);
+      expect(audit).toHaveLength(2);
+    } finally {
+      r.server.close();
+    }
+  });
+
   it('webhook en échec : nouvelle tentative programmée', async () => {
     const r = await receiver(500);
     try {

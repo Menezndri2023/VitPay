@@ -6,6 +6,7 @@ import { decrypt, encrypt, randomToken, sha256 } from '../../common/crypto';
 import { AppError, Errors } from '../../common/errors';
 import { Db } from '../../database/db.service';
 import { AuditService } from '../audit/audit.service';
+import { EmailVerificationService } from './email-verification.service';
 import { dummyVerify, hashPassword, passwordPolicyError, verifyPassword } from './password';
 import { OrgRole, PlatformRole } from './permissions';
 import { Audience, AuthContext, SESSION_TTL_HOURS } from './session';
@@ -49,6 +50,7 @@ export class AuthService {
     private readonly db: Db,
     private readonly audit: AuditService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly verification: EmailVerificationService,
   ) {}
 
   async register(
@@ -90,6 +92,8 @@ export class AuthService {
       { orgId },
     );
 
+    // [R3-8] Jeton créé par le rôle système (le rôle applicatif n'écrit jamais de jeton de vérification).
+    await this.db.system((tx) => this.verification.queue(tx, { id: userId, email, fullName: input.fullName.trim() }));
     const session = await this.createSession(userId, 'business', true, meta);
     return { ...session, orgId, mfaRequired: false, mfaEnrollmentRequired: false };
   }
@@ -175,12 +179,14 @@ export class AuthService {
         mfa_verified: boolean;
         mfa_enabled: boolean;
         platform_role: PlatformRole | null;
+        email_verified: boolean;
       }>(
         `UPDATE sessions s SET last_seen_at = now()
            FROM users u
           WHERE s.token_hash = $1 AND s.audience = $2 AND s.revoked_at IS NULL AND s.expires_at > now()
             AND u.id = s.user_id AND u.status = 'active'
-         RETURNING s.id AS session_id, u.id AS user_id, u.email, u.full_name, s.mfa_verified, u.mfa_enabled, u.platform_role`,
+         RETURNING s.id AS session_id, u.id AS user_id, u.email, u.full_name, s.mfa_verified, u.mfa_enabled, u.platform_role,
+                   (u.email_verified_at IS NOT NULL) AS email_verified`,
         [sha256(token), audience],
       );
       if (!row) return null;
@@ -192,6 +198,7 @@ export class AuthService {
         audience,
         mfaVerified: row.mfa_verified,
         mfaEnabled: row.mfa_enabled,
+        emailVerified: row.email_verified,
         platformRole: audience === 'admin' ? row.platform_role : null,
       };
     });
@@ -207,12 +214,18 @@ export class AuthService {
    */
   async mfaSetup(auth: AuthContext, enrollmentToken?: string): Promise<{ secret: string; otpauthUrl: string }> {
     if (auth.mfaEnabled) throw Errors.invalidState('MFA already enabled');
+    this.assertVerifiedForMfa(auth);
     if (auth.audience === 'admin') await this.assertEnrollmentToken(auth.userId, enrollmentToken);
     const secret = authenticator.generateSecret();
     await this.db.system((tx) =>
       tx.query('UPDATE users SET mfa_secret_enc = $2 WHERE id = $1 AND mfa_enabled = false', [auth.userId, encrypt(secret, this.config.encryptionKey)]),
     );
     return { secret, otpauthUrl: authenticator.keyuri(auth.email, 'VITPAY', secret) };
+  }
+
+  /** [R3-3] Un compte non vérifié ne peut pas lier d'authentificateur (verrouillage du vrai titulaire de l'adresse). */
+  private assertVerifiedForMfa(auth: AuthContext): void {
+    if (!auth.emailVerified) throw new AppError('email_not_verified', 403, 'Confirm your email address first');
   }
 
   private async assertEnrollmentToken(userId: string, token: string | undefined): Promise<void> {
@@ -233,6 +246,7 @@ export class AuthService {
   }
 
   async mfaEnable(auth: AuthContext, code: string, meta: ClientMeta, enrollmentToken?: string): Promise<void> {
+    this.assertVerifiedForMfa(auth);
     if (auth.audience === 'admin') await this.assertEnrollmentToken(auth.userId, enrollmentToken);
     await this.db.system(async (tx) => {
       const u = await tx.one<{ mfa_secret_enc: string | null; mfa_enabled: boolean; mfa_last_step: string | null }>(
@@ -290,7 +304,7 @@ export class AuthService {
       ),
     );
     return {
-      user: { id: auth.userId, email: auth.email, fullName: auth.fullName, mfaEnabled: auth.mfaEnabled, platformRole: auth.platformRole },
+      user: { id: auth.userId, email: auth.email, fullName: auth.fullName, mfaEnabled: auth.mfaEnabled, emailVerified: auth.emailVerified, platformRole: auth.platformRole },
       session: { audience: auth.audience, mfaVerified: auth.mfaVerified },
       organizations: memberships.map((m) => ({ id: m.org_id, role: m.role, displayName: m.display_name, type: m.type, status: m.status, kybStatus: m.kyb_status })),
     };
@@ -306,11 +320,21 @@ export class AuthService {
     const h = await hashPassword(password);
     const token = randomToken(24);
     return this.db.system(async (tx) => {
-      const u = await tx.one<{ id: string; mfa_enabled: boolean }>(
-        `INSERT INTO users (email, password_hash, full_name, platform_role) VALUES ($1,$2,$3,$4)
-         ON CONFLICT ((lower(email))) DO UPDATE SET platform_role = EXCLUDED.platform_role RETURNING id, mfa_enabled`,
-        [email.toLowerCase(), h, fullName, role],
+      // [R3-1] Jamais de promotion d'un compte existant non administrateur : un compte créé par
+      // inscription libre (mot de passe et MFA choisis par un tiers) ne doit pas devenir admin.
+      const existing = await tx.maybeOne<{ id: string; platform_role: PlatformRole | null }>(
+        'SELECT id, platform_role FROM users WHERE lower(email) = $1 FOR UPDATE',
+        [email.toLowerCase()],
       );
+      if (existing && !existing.platform_role) {
+        throw new Error(`${email} est déjà un compte Business : utilisez une adresse dédiée à l'administration`);
+      }
+      const u = existing
+        ? await tx.one<{ id: string; mfa_enabled: boolean }>(`UPDATE users SET platform_role = $2 WHERE id = $1 RETURNING id, mfa_enabled`, [existing.id, role])
+        : await tx.one<{ id: string; mfa_enabled: boolean }>(
+            `INSERT INTO users (email, password_hash, full_name, platform_role, email_verified_at) VALUES ($1,$2,$3,$4, now()) RETURNING id, mfa_enabled`,
+            [email.toLowerCase(), h, fullName, role],
+          );
       let enrollmentToken: string | null = null;
       if (!u.mfa_enabled) {
         await tx.query(`UPDATE users SET mfa_enroll_token_hash = $2, mfa_enroll_expires_at = now() + make_interval(hours => $3) WHERE id = $1`, [

@@ -9,7 +9,9 @@
 ## Authentification
 | Méthode | Route | Description |
 |---|---|---|
-| POST | `/v1/auth/register` | `{email, password, fullName, organizationName, organizationType}` → crée l'utilisateur, l'organisation et le rôle owner |
+| POST | `/v1/auth/register` | `{email, password, fullName, organizationName, organizationType}` → crée l'utilisateur, l'organisation et le rôle owner ; envoie le lien de vérification |
+| POST | `/v1/auth/email/verify` | `{token}` (public) → confirme l'adresse ; lien à usage unique, 48 h |
+| POST | `/v1/auth/email/resend` | Session requise → 202 ; 409 si déjà vérifiée, 429 au-delà de 3 envois/h |
 | POST | `/v1/auth/login` | `{email, password}` → `{mfaRequired}` |
 | POST | `/v1/auth/mfa/verify` · `/mfa/setup` · `/mfa/enable` | TOTP |
 | POST | `/v1/auth/logout` | |
@@ -26,7 +28,7 @@
 | GET / POST / DELETE | `/members`, `/members/:userId` | (`members:manage`) |
 | GET / POST | `/points-of-sale` | (`pos:manage`) |
 | GET / POST / DELETE | `/invitations`, `/invitations/:id` | Invitations par e-mail (`members:manage`) |
-| GET | `/developers/catalog` · GET/POST/DELETE `/developers/api-keys[/:id]` · GET/POST/DELETE `/developers/webhooks[/:id]` · POST `/developers/webhooks/:id/test` | Intégrations (`developers:manage`, session humaine uniquement) |
+| GET | `/developers/catalog` · GET/POST/DELETE `/developers/api-keys[/:id]` · GET/POST/DELETE `/developers/webhooks[/:id]` · POST `/developers/webhooks/:id/test` · POST `/developers/webhooks/:id/rotate-secret {overlapHours}` | Intégrations (`developers:manage`, session humaine uniquement) |
 | GET / POST | `/kyb/documents` (multipart `file` + `kind`), GET `/kyb/documents/:id/download` | Justificatifs KYB chiffrés, PDF/PNG/JPEG ≤ 5 Mo (`org:update`) |
 | GET / POST / DELETE | `/providers`, `/providers/:accountId` | Comptes prestataires (`providers:manage`) |
 | POST 🔑 | `/payment-requests` | `{amount:"500.00", currency, description?, customerName?, customerContact?, expiresInHours?, posId?}` |

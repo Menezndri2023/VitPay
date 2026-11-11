@@ -37,6 +37,8 @@ async function main(): Promise<void> {
         { ip: '127.0.0.1', userAgent: 'seed' },
       );
       const owner = await db.system((tx) => tx.one<{ id: string }>("SELECT id FROM users WHERE lower(email) = 'marchand@vitpay.test'"));
+      // Compte de démonstration fictif (domaine .test, aucune boîte réelle) : adresse marquée vérifiée.
+      await db.system((tx) => tx.query('UPDATE users SET email_verified_at = now() WHERE id = $1', [owner.id]));
       await orgs.connectProvider(r.orgId, owner.id, { providerCode: 'mock', mode: 'sandbox' }, { ip: '127.0.0.1', userAgent: 'seed' });
     }
     console.log(`✓ seed done

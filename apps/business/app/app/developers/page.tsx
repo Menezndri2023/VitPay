@@ -17,6 +17,7 @@ interface Endpoint {
   id: string;
   url: string;
   events: string[];
+  previousSecretExpiresAt?: string | null;
   status: string;
 }
 interface Delivery {
@@ -56,6 +57,21 @@ export default function DevelopersPage() {
 
   if (org.role !== 'owner' && org.role !== 'admin') return <Alert kind="warning">Réservé aux propriétaires et administrateurs.</Alert>;
   if (!catalog) return <p className="vp-muted">Chargement…</p>;
+
+  const rotate = (ep: Endpoint) =>
+    run(async () => {
+      if (
+        !window.confirm(
+          'Avant de changer le secret : pendant 24 h, chaque requête portera DEUX signatures v1 (nouveau et ancien secret). Votre code de vérification doit accepter plusieurs valeurs v1 (voir la documentation développeur), sinon vos réceptions échoueront.\n\nContinuer ?',
+        )
+      )
+        return;
+      const leaked = window.confirm(
+        'Le secret actuel a-t-il fuité ?\n\nOK : il est révoqué immédiatement.\nAnnuler : il reste accepté 24 h, le temps de déployer le nouveau.',
+      );
+      const r = await orgApi<{ secret: string }>(`/developers/webhooks/${ep.id}/rotate-secret`, { method: 'POST', body: { overlapHours: leaked ? 0 : 24 } });
+      setSecret({ label: `Nouveau secret de signature pour ${ep.url}`, value: r.secret });
+    }, 'Secret remplacé.');
 
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
     setMsg(null);
@@ -168,6 +184,9 @@ export default function DevelopersPage() {
             <span>
               <span className="vp-mono">{ep.url}</span>
               <div className="vp-small vp-muted">{ep.events.join(', ')}</div>
+              {ep.previousSecretExpiresAt && new Date(ep.previousSecretExpiresAt) > new Date() && (
+                <div className="vp-small vp-muted">Ancien secret encore accepté jusqu’au {new Date(ep.previousSecretExpiresAt).toLocaleString('fr-MA', { timeZone: 'Africa/Casablanca' })}</div>
+              )}
             </span>
             <span className="vp-row" style={{ gap: 6 }}>
               <StatusBadge status={ep.status} />
@@ -175,6 +194,9 @@ export default function DevelopersPage() {
                 <>
                   <Button variant="ghost" onClick={() => run(() => orgApi(`/developers/webhooks/${ep.id}/test`, { method: 'POST' }), 'Événement de test programmé.')}>
                     Tester
+                  </Button>
+                  <Button variant="ghost" onClick={() => rotate(ep)}>
+                    Changer le secret
                   </Button>
                   <Button variant="ghost" onClick={() => run(() => orgApi(`/developers/webhooks/${ep.id}`, { method: 'DELETE' }), 'Endpoint désactivé.')}>
                     Désactiver

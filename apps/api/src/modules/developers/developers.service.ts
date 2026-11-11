@@ -19,6 +19,19 @@ const AUTO_DISABLE_AFTER = 50;
 const DELIVERY_CONCURRENCY = 10;
 const LEASE_SECONDS = 60;
 const KEY_PREFIX = 'vp_sk_';
+/** Durée pendant laquelle l'ancien secret signe encore, après une rotation. */
+export const ROTATION_OVERLAP_HOURS = 24;
+
+interface ClaimedDelivery {
+  id: string;
+  event_id: string;
+  payload: unknown;
+  attempts: number;
+  endpoint_id: string;
+  url: string;
+  secret_enc: string;
+  previous_secret_enc: string | null;
+}
 
 export interface ResolvedApiKey {
   keyId: string;
@@ -137,7 +150,7 @@ export class DevelopersService implements OnModuleInit {
 
   async listEndpoints(orgId: string) {
     return this.db.forOrg(orgId, async (tx) => {
-      const eps = await tx.query<Record<string, unknown>>(`SELECT id, url, events, status, created_at FROM webhook_endpoints ORDER BY created_at DESC`);
+      const eps = await tx.query<Record<string, unknown>>(`SELECT id, url, events, status, disabled_reason, secret_rotated_at, previous_secret_expires_at, created_at FROM webhook_endpoints ORDER BY created_at DESC`);
       const deliveries = await tx.query<Record<string, unknown>>(
         `SELECT id, endpoint_id, event_type, status, attempts, last_status_code, last_error, created_at, delivered_at
            FROM webhook_deliveries ORDER BY created_at DESC LIMIT 50`,
@@ -146,9 +159,38 @@ export class DevelopersService implements OnModuleInit {
     });
   }
 
+  /**
+   * Rotation du secret de signature : le nouveau secret signe immédiatement ; l'ancien reste
+   * accepté pendant la période de recouvrement (deux valeurs v1 dans l'en-tête), le temps que le
+   * commerçant déploie le nouveau. Une nouvelle rotation remplace l'ancien secret précédent.
+   */
+  async rotateSecret(orgId: string, actor: AuditActor, id: string, overlapHours = ROTATION_OVERLAP_HOURS) {
+    const secret = `whsec_${randomToken(32)}`;
+    return this.db.forOrg(orgId, async (tx) => {
+      const r = await tx.maybeOne<{ id: string; previous_secret_expires_at: Date | null }>(
+        `UPDATE webhook_endpoints
+            SET previous_secret_enc = CASE WHEN $3::int > 0 THEN secret_enc END,
+                previous_secret_expires_at = CASE WHEN $3::int > 0 THEN now() + make_interval(hours => $3::int) END,
+                secret_enc = $2, secret_rotated_at = now()
+          WHERE id = $1 AND status = 'active'
+            AND (secret_rotated_at IS NULL OR secret_rotated_at < now() - interval '10 seconds')
+          RETURNING id, previous_secret_expires_at`,
+        [id, encrypt(secret, this.config.encryptionKey), overlapHours],
+      );
+      if (!r) {
+        // [R3-7] Deux rotations simultanées : la seconde est refusée (le premier secret remis resterait sinon « ancien »).
+        const exists = await tx.maybeOne(`SELECT 1 FROM webhook_endpoints WHERE id = $1 AND status = 'active'`, [id]);
+        if (!exists) throw Errors.notFound('Endpoint');
+        throw Errors.conflict('rotation_in_progress', 'Secret was just rotated; retry in a few seconds');
+      }
+      await this.audit.record(tx, { actor, orgId, action: 'developers.webhook_secret_rotated', targetType: 'webhook_endpoint', targetId: id, after: { overlapHours } });
+      return { id, secret, previousSecretExpiresAt: r.previous_secret_expires_at?.toISOString() ?? null };
+    });
+  }
+
   async disableEndpoint(orgId: string, actor: AuditActor, id: string) {
     await this.db.forOrg(orgId, async (tx) => {
-      const r = await tx.query(`UPDATE webhook_endpoints SET status = 'disabled' WHERE id = $1 AND status = 'active' RETURNING id`, [id]);
+      const r = await tx.query(`UPDATE webhook_endpoints SET status = 'disabled', previous_secret_enc = NULL, previous_secret_expires_at = NULL WHERE id = $1 AND status = 'active' RETURNING id`, [id]);
       if (!r.length) throw Errors.notFound('Endpoint');
       await this.audit.record(tx, { actor, orgId, action: 'developers.webhook_disabled', targetType: 'webhook_endpoint', targetId: id });
     });
@@ -193,7 +235,7 @@ export class DevelopersService implements OnModuleInit {
    */
   async deliverDue(limit = 30): Promise<number> {
     const claimed = await this.db.system((tx) =>
-      tx.query<{ id: string; event_id: string; payload: unknown; attempts: number; endpoint_id: string; url: string; secret_enc: string }>(
+      tx.query<ClaimedDelivery>(
         `WITH due AS (
            SELECT DISTINCT ON (d.endpoint_id) d.id
              FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id
@@ -203,7 +245,8 @@ export class DevelopersService implements OnModuleInit {
          UPDATE webhook_deliveries d SET next_attempt_at = now() + make_interval(secs => $2)
            FROM webhook_endpoints e
           WHERE d.id IN (SELECT id FROM due) AND e.id = d.endpoint_id
-         RETURNING d.id, d.event_id, d.payload, d.attempts, d.endpoint_id, e.url, e.secret_enc`,
+         RETURNING d.id, d.event_id, d.payload, d.attempts, d.endpoint_id, e.url, e.secret_enc,
+                   CASE WHEN e.previous_secret_expires_at > now() THEN e.previous_secret_enc END AS previous_secret_enc`,
         [limit, LEASE_SECONDS],
       ),
     );
@@ -212,6 +255,10 @@ export class DevelopersService implements OnModuleInit {
       const results = await Promise.all(claimed.slice(i, i + DELIVERY_CONCURRENCY).map((d) => this.deliverOne(d)));
       ok += results.filter(Boolean).length;
     }
+    // [R3-5] Les anciens secrets expirés sont effacés (pas de conservation inutile de matériel de signature).
+    await this.db.system((tx) =>
+      tx.query(`UPDATE webhook_endpoints SET previous_secret_enc = NULL, previous_secret_expires_at = NULL WHERE previous_secret_enc IS NOT NULL AND previous_secret_expires_at <= now()`),
+    );
     await this.db.system((tx) =>
       tx.query(`UPDATE webhook_deliveries SET status = 'failed', last_error = 'endpoint_disabled'
                  WHERE status = 'pending' AND endpoint_id IN (SELECT id FROM webhook_endpoints WHERE status = 'disabled')`),
@@ -219,10 +266,12 @@ export class DevelopersService implements OnModuleInit {
     return ok;
   }
 
-  private async deliverOne(d: { id: string; event_id: string; payload: unknown; attempts: number; endpoint_id: string; url: string; secret_enc: string }): Promise<boolean> {
+  private async deliverOne(d: ClaimedDelivery): Promise<boolean> {
     const body = JSON.stringify(d.payload);
     const ts = Math.floor(Date.now() / 1000).toString();
-    const signature = `t=${ts},v1=${hmacSha256Hex(decrypt(d.secret_enc, this.config.encryptionKey), `${ts}.${body}`)}`;
+    const sign = (enc: string) => hmacSha256Hex(decrypt(enc, this.config.encryptionKey), `${ts}.${body}`);
+    // Pendant une rotation : une signature par secret valide (le récepteur en accepte une).
+    const signature = [`t=${ts}`, `v1=${sign(d.secret_enc)}`, ...(d.previous_secret_enc ? [`v1=${sign(d.previous_secret_enc)}`] : [])].join(',');
     let status: number | null = null;
     let error: string | null = null;
     try {

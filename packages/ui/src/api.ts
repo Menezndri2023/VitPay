@@ -17,6 +17,11 @@ export interface ApiOptions {
   idempotencyKey?: string;
 }
 
+/** Messages en français pour les refus que l'utilisateur peut corriger lui-même. */
+const FRIENDLY: Record<string, string> = {
+  email_not_verified: 'Confirmez d’abord votre adresse e-mail avec le lien reçu.',
+};
+
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = { 'x-vitpay-csrf': '1' };
   if (opts.body !== undefined) headers['content-type'] = 'application/json';
@@ -32,7 +37,8 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
   const data = ct.includes('json') ? await res.json() : await res.text();
   if (!res.ok) {
     const p = (typeof data === 'object' && data) || {};
-    throw new ApiError(res.status, (p as { code?: string }).code ?? 'error', (p as { title?: string }).title ?? res.statusText, (p as { details?: unknown }).details);
+    const code = (p as { code?: string }).code ?? 'error';
+    throw new ApiError(res.status, code, FRIENDLY[code] ?? (p as { title?: string }).title ?? res.statusText, (p as { details?: unknown }).details);
   }
   return data as T;
 }

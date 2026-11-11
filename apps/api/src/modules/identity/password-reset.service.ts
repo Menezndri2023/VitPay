@@ -79,7 +79,14 @@ export class PasswordResetService {
       );
       if (!r) throw new AppError('invalid_token', 400, 'Invalid or expired link');
       await tx.query(`UPDATE password_resets SET used_at = now() WHERE id = $1`, [r.id]);
-      await tx.query(`UPDATE users SET password_hash = $2, failed_login_count = 0, locked_until = NULL, updated_at = now() WHERE id = $1`, [r.user_id, hash]);
+      // [R3-3] Compte jamais vérifié : la MFA éventuelle a pu être posée par un tiers ; elle est retirée.
+      await tx.query(
+        `UPDATE users SET mfa_enabled = false, mfa_secret_enc = NULL, mfa_last_step = NULL WHERE id = $1 AND email_verified_at IS NULL AND platform_role IS NULL`,
+        [r.user_id],
+      );
+      // Le lien reçu par e-mail prouve aussi la possession de l'adresse.
+      await tx.query(`UPDATE users SET password_hash = $2, failed_login_count = 0, locked_until = NULL,
+                   email_verified_at = coalesce(email_verified_at, now()), updated_at = now() WHERE id = $1`, [r.user_id, hash]);
       // Toutes les sessions existantes sont révoquées.
       await tx.query(`UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, [r.user_id]);
       await this.audit.record(tx, { actor: { type: 'public', ...meta }, action: 'auth.password_reset', targetType: 'user', targetId: r.user_id });

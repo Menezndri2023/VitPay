@@ -142,7 +142,8 @@ export class InvitationsService {
     if (policy) throw Errors.validation({ password: policy });
     const hash = await hashPassword(input.password);
     const userId = await this.db.system(async (tx) => {
-      const u = await tx.one<{ id: string }>(`INSERT INTO users (email, password_hash, full_name) VALUES ($1,$2,$3) RETURNING id`, [inv.email, hash, input.fullName.trim()]);
+      // Le lien d'invitation, reçu sur cette adresse, vaut vérification de l'e-mail.
+      const u = await tx.one<{ id: string }>(`INSERT INTO users (email, password_hash, full_name, email_verified_at) VALUES ($1,$2,$3, now()) RETURNING id`, [inv.email, hash, input.fullName.trim()]);
       return u.id;
     });
     await this.consume(inv, userId, meta);
@@ -157,6 +158,8 @@ export class InvitationsService {
       );
       if (!r.length) throw new AppError('invalid_invitation', 404, 'Invitation not found or expired');
       await tx.query(`INSERT INTO memberships (org_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [inv.org_id, userId, inv.role]);
+      // [R3-4] Le lien d'invitation, reçu sur cette adresse, vaut vérification de l'e-mail.
+      await tx.query(`UPDATE users SET email_verified_at = coalesce(email_verified_at, now()) WHERE id = $1`, [userId]);
       await this.audit.record(tx, { actor: { type: 'user', userId, ...meta }, orgId: inv.org_id, action: 'member.joined', targetType: 'user', targetId: userId, after: { role: inv.role, invitationId: inv.id } });
     });
   }

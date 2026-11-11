@@ -26,6 +26,15 @@ describe('VITPAY ADMIN', () => {
     expect(r.status).toBe(401);
   });
 
+  it('un compte Business existant ne peut jamais être promu administrateur (mot de passe et MFA d’un tiers)', async () => {
+    await registerMerchant(ctx, 'ops@admin.test', 'Org squat', { verify: false });
+    const auth = ctx.app.get(AuthService);
+    await expect(auth.createPlatformAdmin('ops@admin.test', 'Other-Password-2026!', 'Ops', 'super_admin')).rejects.toThrow(/compte Business/);
+    const row = await ownerQuery<{ platform_role: string | null }>(`SELECT platform_role FROM users WHERE email = 'ops@admin.test'`);
+    expect(row[0]?.platform_role).toBeNull();
+    expect((await ctx.api().post('/v1/admin/auth/login').send({ email: 'ops@admin.test', password: PASSWORD })).status).toBe(401);
+  });
+
   it('MFA obligatoire : sans enrôlement, aucune route admin n’est accessible', async () => {
     const { s, body } = await login(ctx, 'support@admin.test', 'admin');
     expect(body.mfaEnrollmentRequired).toBe(true);

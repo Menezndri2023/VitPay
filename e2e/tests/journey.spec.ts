@@ -4,11 +4,28 @@ const BIZ = process.env.BIZ_URL ?? 'http://localhost:3711';
 const PAY = process.env.PAY_URL ?? 'http://localhost:3710';
 const ADMIN = process.env.ADMIN_URL ?? 'http://localhost:3712';
 const SHOTS = process.env.PW_SHOTS;
+const MAILPIT = process.env.MAILPIT_URL;
+
+/** Dernier lien correspondant dans les e-mails reçus par Mailpit (envoyés par le worker via SMTP). */
+async function mailLink(request: import('@playwright/test').APIRequestContext, to: string, re: RegExp): Promise<string> {
+  for (let i = 0; i < 30; i++) {
+    const list = await (await request.get(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}`)).json();
+    for (const m of list.messages ?? []) {
+      const msg = await (await request.get(`${MAILPIT}/api/v1/message/${m.ID}`)).json();
+      const link = String(msg.Text).match(re)?.[1];
+      if (link) return link;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`aucun e-mail pour ${to}`);
+}
+
 const shot = async (page: import('@playwright/test').Page, name: string) => {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
 };
 
-test('parcours complet : inscription → prestataire → demande → paiement → confirmation', async ({ page, context }) => {
+test('parcours complet : inscription → vérification e-mail → prestataire → demande → paiement → confirmation', async ({ page, context, request }) => {
+  test.skip(!MAILPIT, 'MAILPIT_URL non défini (pile docker sandbox requise)');
   const email = `e2e-${Date.now()}@vitpay.test`;
 
   // Inscription
@@ -20,8 +37,24 @@ test('parcours complet : inscription → prestataire → demande → paiement �
   await page.getByLabel('Nom commercial').fill('Atelier E2E Rabat');
   await page.getByRole('button', { name: 'Créer mon compte' }).click();
 
-  // Connexion du prestataire simulé
+  // Adresse non confirmée : bandeau, connexion du prestataire refusée
   await expect(page.getByText('Bienvenue sur VITPAY')).toBeVisible();
+  await expect(page.getByText(/Confirmez votre adresse/)).toBeVisible();
+  await page.getByRole('button', { name: /Connecter : Prestataire simulé/ }).click();
+  await expect(page.getByText('Confirmez d’abord votre adresse e-mail avec le lien reçu.')).toBeVisible();
+
+  // Lien reçu par e-mail (SMTP → Mailpit)
+  const verify = await mailLink(request, email, /(http:\/\/localhost:3711\/verify-email\?token=\S+)/);
+  await page.goto(verify);
+  await page.getByRole('button', { name: 'Confirmer mon adresse' }).click();
+  await expect(page.getByText('Adresse confirmée.')).toBeVisible();
+  await page.getByRole('link', { name: 'Accéder à mon espace' }).click();
+  await page.waitForURL(/\/app$/);
+  await page.goto(`${BIZ}/app/settings`);
+  await expect(page.getByRole('heading', { name: 'Paramètres' })).toBeVisible();
+  await expect(page.getByText(/Confirmez votre adresse/)).toHaveCount(0);
+
+  // Connexion du prestataire simulé
   await page.getByRole('button', { name: /Connecter : Prestataire simulé/ }).click();
   await expect(page.getByText('Prestataire simulé (sandbox) connecté.')).toBeVisible();
   await shot(page, '02-settings');
@@ -126,7 +159,6 @@ test('responsive : page de paiement sans défilement horizontal en largeur mobil
 
 test('mot de passe oublié : e-mail réel (SMTP → Mailpit) puis réinitialisation', async ({ page, request }) => {
   test.skip(!process.env.MAILPIT_URL, 'MAILPIT_URL non défini (pile docker sandbox requise)');
-  const MAILPIT = process.env.MAILPIT_URL as string;
   const email = `reset-${Date.now()}@vitpay.test`;
   await request.post(`${BIZ}/api/v1/auth/register`, {
     data: { email, password: 'E2e-Password-2026!', fullName: 'Reset E2E', organizationName: 'Org Reset' },
@@ -139,18 +171,8 @@ test('mot de passe oublié : e-mail réel (SMTP → Mailpit) puis réinitialisat
   await expect(page.getByText(/un lien de réinitialisation/)).toBeVisible();
 
   // Lecture de l'e-mail dans Mailpit (envoyé par le worker via SMTP)
-  let link: string | undefined;
-  for (let i = 0; i < 30 && !link; i++) {
-    const list = await (await request.get(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`)).json();
-    const id = list.messages?.[0]?.ID;
-    if (id) {
-      const msg = await (await request.get(`${MAILPIT}/api/v1/message/${id}`)).json();
-      link = String(msg.Text).match(/(http:\/\/localhost:3711\/reset-password\?token=\S+)/)?.[1];
-    }
-    if (!link) await page.waitForTimeout(1000);
-  }
-  expect(link).toBeTruthy();
-  await page.goto(link as string);
+  const link = await mailLink(request, email, /(http:\/\/localhost:3711\/reset-password\?token=\S+)/);
+  await page.goto(link);
   await page.getByLabel('Nouveau mot de passe').fill('Brand-New-Pass-2026!');
   await page.getByLabel('Confirmation').fill('Brand-New-Pass-2026!');
   await page.getByRole('button', { name: 'Enregistrer' }).click();

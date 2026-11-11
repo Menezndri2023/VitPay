@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { api, ApiError } from '@vitpay/ui';
 
 export interface Me {
-  user: { id: string; email: string; fullName: string; mfaEnabled: boolean };
+  user: { id: string; email: string; fullName: string; mfaEnabled: boolean; emailVerified: boolean };
   organizations: { id: string; role: string; displayName: string; type: string; status: string; kybStatus: string }[];
 }
 

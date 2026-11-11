@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { EmailService } from '../src/modules/email/email.service';
-import { connectMock, createRequest, login, ownerQuery, PASSWORD, payerActs, registerMerchant, resetDb, Session, startApp, TestCtx, tokenOf } from './helpers';
+import { connectMock, verificationToken, createRequest, login, ownerQuery, PASSWORD, payerActs, registerMerchant, resetDb, Session, startApp, TestCtx, tokenOf } from './helpers';
 
 describe('e-mails, mot de passe oublié, invitations', () => {
   let ctx: TestCtx;
@@ -20,19 +20,50 @@ describe('e-mails, mot de passe oublié, invitations', () => {
     return link;
   };
 
+  it('vérification e-mail : opérations sensibles bloquées tant que le lien n’est pas ouvert', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'unverified@acc.test', 'Org non vérifiée', { verify: false });
+    expect((await s.get('/v1/auth/me')).body.user.emailVerified).toBe(false);
+    // Lecture autorisée, opérations sensibles refusées
+    expect((await s.get(`/v1/orgs/${orgId}/providers`)).status).toBe(200);
+    const blocked = await s.post(`/v1/orgs/${orgId}/providers`, { providerCode: 'mock', mode: 'sandbox' });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.code).toBe('email_not_verified');
+    expect((await s.post(`/v1/orgs/${orgId}/invitations`, { email: 'x@acc.test', role: 'viewer' })).status).toBe(403);
+    expect((await s.post(`/v1/orgs/${orgId}/developers/api-keys`, { name: 'Clé', scopes: ['requests:read'] })).status).toBe(403);
+    // Pas d'authentificateur lié par un compte non vérifié (verrouillage du vrai titulaire)
+    expect((await s.post('/v1/auth/mfa/setup')).status).toBe(403);
+
+    // Renvoi : l'ancien lien est invalidé ; plafond par compte
+    const first = await verificationToken('unverified@acc.test');
+    expect((await s.post('/v1/auth/email/resend')).status).toBe(202);
+    const second = await verificationToken('unverified@acc.test');
+    expect(second).not.toBe(first);
+    expect((await ctx.api().post('/v1/auth/email/verify').send({ token: first })).status).toBe(400);
+    expect((await s.post('/v1/auth/email/resend')).status).toBe(202);
+    expect((await s.post('/v1/auth/email/resend')).status).toBe(429);
+    const latest = await verificationToken('unverified@acc.test');
+    expect((await ctx.api().post('/v1/auth/email/verify').send({ token: second })).status).toBe(400); // remplacé par le dernier envoi
+
+    expect((await ctx.api().post('/v1/auth/email/verify').send({ token: latest })).status).toBe(200);
+    expect((await ctx.api().post('/v1/auth/email/verify').send({ token: latest })).status).toBe(400); // usage unique
+    expect((await s.get('/v1/auth/me')).body.user.emailVerified).toBe(true);
+    expect((await s.post(`/v1/orgs/${orgId}/providers`, { providerCode: 'mock', mode: 'sandbox' })).status).toBe(201);
+    expect((await s.post('/v1/auth/email/resend')).status).toBe(409);
+  });
+
   it('mot de passe oublié : réponse identique, lien à usage unique, sessions révoquées', async () => {
     const { s } = await registerMerchant(ctx, 'forgot@acc.test');
     expect((await ctx.api().post('/v1/auth/password/forgot').send({ email: 'nobody@acc.test' })).status).toBe(202);
     expect((await ctx.api().post('/v1/auth/password/forgot').send({ email: 'forgot@acc.test' })).status).toBe(202);
     // Traitement asynchrone (temps de réponse constant) : on attend la mise en file.
-    for (let i = 0; i < 50 && !email.sentLog.some((m) => m.to === 'forgot@acc.test'); i++) {
+    for (let i = 0; i < 50 && !email.sentLog.some((m) => m.to === 'forgot@acc.test' && m.template === 'password_reset'); i++) {
       await new Promise((r) => setTimeout(r, 50));
       await email.processQueue();
     }
     const token = lastLink('forgot@acc.test', /reset-password\?token=([A-Za-z0-9_%-]+)/);
     expect(email.sentLog.some((m) => m.to === 'nobody@acc.test')).toBe(false);
     // Le corps de l'e-mail (lien à jeton) est purgé après envoi
-    const stored = await ownerQuery<{ text_body: string | null; status: string }>(`SELECT text_body, status FROM outbound_emails WHERE to_address = 'forgot@acc.test'`);
+    const stored = await ownerQuery<{ text_body: string | null; status: string }>(`SELECT text_body, status FROM outbound_emails WHERE to_address = 'forgot@acc.test' AND template = 'password_reset'`);
     expect(stored[0]).toEqual({ text_body: null, status: 'sent' });
 
     const weak = await ctx.api().post('/v1/auth/password/reset').send({ token: decodeURIComponent(token), password: 'short' });
@@ -76,7 +107,7 @@ describe('e-mails, mot de passe oublié, invitations', () => {
 
   it('invitation d’un compte existant : acceptation réservée au bon e-mail', async () => {
     const { s, orgId } = await registerMerchant(ctx, 'boss2@acc.test', 'Org Deux');
-    await registerMerchant(ctx, 'existing@acc.test', 'Sa propre org');
+    await registerMerchant(ctx, 'existing@acc.test', 'Sa propre org', { verify: false });
     await registerMerchant(ctx, 'intruder@acc.test', 'Org intrus');
     await s.post(`/v1/orgs/${orgId}/invitations`, { email: 'existing@acc.test', role: 'viewer' });
     await email.processQueue();
@@ -88,6 +119,8 @@ describe('e-mails, mot de passe oublié, invitations', () => {
     expect((await existing.post(`/v1/invitations/${token}/accept`)).status).toBe(200);
     const me = await existing.get('/v1/auth/me');
     expect(me.body.organizations.map((o: { id: string }) => o.id)).toContain(orgId);
+    // Le lien d'invitation reçu sur l'adresse vaut vérification
+    expect(me.body.user.emailVerified).toBe(true);
   });
 
   it('paiement reçu : notification et e-mail au propriétaire', async () => {

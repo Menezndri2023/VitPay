@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { APP_CONFIG, AppConfig } from '../../config';
-import { Errors } from '../../common/errors';
+import { AppError, Errors } from '../../common/errors';
 import { Db } from '../../database/db.service';
 import { DevelopersService } from '../developers/developers.service';
 import { AuthService } from './auth.service';
@@ -19,6 +19,8 @@ import { Audience, COOKIE_NAMES, VitpayRequest } from './session';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export const CSRF_HEADER = 'x-vitpay-csrf';
+/** Opérations refusées tant que l'adresse e-mail n'est pas confirmée (anti-usurpation à l'inscription). */
+const EMAIL_VERIFIED_PERMISSIONS: ReadonlySet<OrgPermission> = new Set(['org:update', 'members:manage', 'providers:manage', 'developers:manage', 'refunds:create']);
 
 /**
  * Garde unique, appliquée à TOUTES les routes (deny by default) :
@@ -91,6 +93,9 @@ export class SecurityGuard implements CanActivate {
       // 404 plutôt que 403 : ne pas révéler l'existence d'une organisation tierce.
       if (!m) throw Errors.notFound('Organization');
       if (!orgRoleHas(m.role, orgPerm)) throw Errors.forbidden(`Missing permission ${orgPerm}`);
+      if (!auth.emailVerified && EMAIL_VERIFIED_PERMISSIONS.has(orgPerm) && !SAFE_METHODS.has(req.method)) {
+        throw new AppError('email_not_verified', 403, 'Confirm your email address first');
+      }
       if (m.status !== 'active' && !SAFE_METHODS.has(req.method) && !this.meta<boolean>(META_ALLOW_SUSPENDED, ctx)) {
         throw Errors.forbidden('Organization is suspended');
       }
@@ -123,6 +128,7 @@ export class SecurityGuard implements CanActivate {
       audience: 'business',
       mfaVerified: true,
       mfaEnabled: false,
+      emailVerified: true, // le créateur d'une clé a dû confirmer son adresse (developers:manage)
       platformRole: null,
       apiKeyId: key.keyId,
       apiKeyOrgId: key.orgId,
