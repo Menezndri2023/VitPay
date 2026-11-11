@@ -9,7 +9,8 @@
     "start": "node --env-file-if-exists=.env dist/src/main.js",
     "migrate": "node --env-file-if-exists=.env -r @swc-node/register src/database/migrate.cli.ts",
     "seed": "node --env-file-if-exists=.env -r @swc-node/register src/database/seed.cli.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "keys:reencrypt": "node --env-file-if-exists=.env -r @swc-node/register src/database/reencrypt.cli.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

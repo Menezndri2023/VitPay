@@ -82,7 +82,7 @@ export class AccountCleanupService {
           targetType: 'user',
           targetId: u.id,
           // Empreinte à clé (HMAC) : non réversible par dictionnaire sans le secret serveur.
-          metadata: { emailHmac: hmacSha256Hex(this.config.APP_ENCRYPTION_KEY, `released-email:${u.email.toLowerCase()}`), closedOrganizations: orgs.map((o) => o.org_id), retentionDays: UNVERIFIED_RETENTION_DAYS },
+          metadata: { emailHmac: hmacSha256Hex(this.config.encryptionKey.pseudonymKey(), `released-email:${u.email.toLowerCase()}`), closedOrganizations: orgs.map((o) => o.org_id), retentionDays: UNVERIFIED_RETENTION_DAYS },
         });
         return true;
       });

@@ -102,10 +102,33 @@ Points ouverts : rotation de la clé de chiffrement `APP_ENCRYPTION_KEY` (rechif
 
 Résiduel connu : le journal d'audit (immuable) conserve le nom d'organisation saisi à l'inscription d'un compte libéré — à couvrir par la durée de conservation de l'audit (COMPLIANCE C3).
 
+## Cinquième revue indépendante (11/11/2026) — rotation de clé et avoirs reportés
+
+| # | Défaut | Correction |
+|---|---|---|
+| R5-1 | Le décodeur base64 tolérant faisait disparaître silencieusement une ancienne clé mal séparée (espace, point-virgule…) | Validation stricte (base64 canonique), doublons et éléments vides refusés (`key-rotation.test.ts`) |
+| R5-2 | Rechiffrement des justificatifs KYB par lots de 200 (jusqu'à 1 Go en mémoire) | Lots de 2 pour les contenus binaires |
+| R5-3 | Une valeur illisible bloquait toute la rotation | Parcours par identifiant, échec isolé et compté, code de sortie non nul |
+| R5-4 | Pas d'audit en cas de rotation interrompue | Une entrée d'audit par colonne traitée |
+| R5-5 | Report d'avoir invisible pour la finance | `deferred` dans la réponse d'émission |
+| R5-6 | Avoir affiché brut (non net des commissions à facturer) | Position nette ; filtre explicite par organisation |
+| R5-7 | Anciens relevés négatifs bloqués | Annulés (migration 017) : l'avoir redevient en attente |
+| R5-8 | Déploiement progressif / retour arrière pendant une rotation | Procédure en deux phases ci-dessous |
+| R5-10 | Empreinte d'adresse calculée avec la clé de chiffrement | Clé dérivée dédiée (HKDF) |
+
+Restant (R5-9, défense en profondeur) : lier chaque chiffré à son contexte (table, colonne, ligne) par données associées GCM, pour empêcher la permutation de chiffrés par un attaquant ayant un accès en écriture à la base.
+
 ## À faire avant la production
 
 1. **Test d'intrusion externe** et revue OWASP ASVS niveau 2.
-2. Rotation des clés : versionner `APP_ENCRYPTION_KEY` (préfixe `v1.` déjà en place), procédure de re-chiffrement.
+2. ☑ Rotation de la clé de chiffrement (`key-rotation.test.ts`). Chaque valeur porte l'identifiant de sa clé (`v2.<kid>.…`) ; l'ancien format reste lisible. Procédure en **deux phases** (compatible avec un déploiement progressif : aucune instance ne reçoit une valeur qu'elle ne sait pas lire) :
+   1. Générer la nouvelle clé (`openssl rand -base64 32`) dans le coffre de secrets. Format strict vérifié au démarrage (base64 canonique, ni doublon ni élément vide).
+   2. **Phase 1** — déployer partout `APP_ENCRYPTION_KEY=<ancienne>` et `APP_ENCRYPTION_KEYS_PREVIOUS=<nouvelle>` : toutes les instances savent lire la nouvelle clé, aucune ne l'utilise encore.
+   3. **Phase 2** — une fois la phase 1 entièrement déployée : `APP_ENCRYPTION_KEY=<nouvelle>`, `APP_ENCRYPTION_KEYS_PREVIOUS=<ancienne>`.
+   4. Lancer `pnpm --filter @vitpay/api keys:reencrypt` : par lots, reprenable, une ligne en échec n'arrête pas les autres (table/colonne/identifiant journalisés, jamais la valeur), audit par colonne. Code de sortie 0 = tout est rechiffré.
+   5. Vérifier `keys:reencrypt --status`, puis retirer l'ancienne clé, redéployer. Conserver l'ancienne clé dans le coffre aussi longtemps que les sauvegardes qu'elle protège.
+   Retour arrière : la version actuelle lit les deux formats ; ne pas revenir à une version antérieure au 11/11/2026 (format v1 seul) après écriture de valeurs v2.
+   Un test vérifie que toute nouvelle colonne `*_enc` est couverte par la rotation.
 3. ☑ Rôle PostgreSQL distinct `vitpay_system` (BYPASSRLS) pour les chemins système ; plus de variable de contournement ; moindre privilège du rôle applicatif (aucun accès aux sessions, webhooks, idempotence, approbations, prestataire simulé ; pas de modification des utilisateurs) — migration 007, testé.
 4. Limitation de débit distribuée (stockage partagé) dès qu'il y a plusieurs instances ; plafonner les webhooks rejetés stockés.
 4b. ☑ Outbox : chaque événement est verrouillé et validé dans sa propre transaction.

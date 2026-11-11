@@ -7,6 +7,7 @@ x-api-env: &api-env
   DATABASE_URL: postgres://vitpay_app:dev_app_password_change_me@postgres:5432/vitpay
   DATABASE_SYSTEM_URL: postgres://vitpay_system:dev_system_password_change_me@postgres:5432/vitpay
   APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?générer avec openssl rand -base64 32}
+  APP_ENCRYPTION_KEYS_PREVIOUS: ${APP_ENCRYPTION_KEYS_PREVIOUS:-}
   PUBLIC_API_URL: http://localhost:4710
   PAY_BASE_URL: http://localhost:3710
   ALLOWED_ORIGINS: http://localhost:3710,http://localhost:3711,http://localhost:3712

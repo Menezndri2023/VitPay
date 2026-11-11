@@ -10,6 +10,7 @@ import { AdminService } from './modules/admin/admin.service';
 import { DevelopersController } from './modules/developers/developers.controller';
 import { DevelopersService } from './modules/developers/developers.service';
 import { EmailService } from './modules/email/email.service';
+import { KeyRotationService } from './modules/security/key-rotation.service';
 import { AccountCleanupService } from './modules/identity/account-cleanup.service';
 import { EmailVerificationService } from './modules/identity/email-verification.service';
 import { PasswordResetService } from './modules/identity/password-reset.service';
@@ -105,6 +106,7 @@ export class AppModule {
         PasswordResetService,
         EmailVerificationService,
         AccountCleanupService,
+        KeyRotationService,
         InvitationsService,
         KybDocumentsService,
         DevelopersService,

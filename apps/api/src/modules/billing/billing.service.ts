@@ -98,16 +98,18 @@ export class BillingService {
     );
     const issued: ReturnType<BillingService['view']>[] = [];
     const conflicts: string[] = [];
+    // [R5-5] Solde créditeur reporté : signalé à la finance (distinct de « rien à facturer »).
+    const deferred: { orgId: string; credit: ReturnType<typeof money> }[] = [];
     for (const g of groups) {
       try {
-        const st = await this.db.system((tx) => this.issueOne(tx, actor, input, g));
+        const st = await this.db.system((tx) => this.issueOne(tx, actor, input, g, (net) => deferred.push({ orgId: g.org_id, credit: money(net.negate().minor.toString(), g.currency) })));
         if (st) issued.push(st);
       } catch (e) {
         if (isUniqueViolation(e)) conflicts.push(g.org_id);
         else throw e;
       }
     }
-    return { issued, conflicts };
+    return { issued, conflicts, deferred };
   }
 
   private async issueOne(
@@ -115,6 +117,7 @@ export class BillingService {
     actor: AuditActor & { userId: string },
     input: { periodStart: string; periodEnd: string; mode: 'sandbox' | 'live' },
     g: { org_id: string; currency: Currency },
+    onDeferred: (net: Money) => void = () => undefined,
   ): Promise<ReturnType<BillingService['view']> | null> {
     // [R4-P1] Un seul calcul à la fois par organisation, devise et mode : deux émissions simultanées
     // ne peuvent pas compter deux fois le même écart (les requêtes suivantes voient l'état validé).
@@ -132,7 +135,10 @@ export class BillingService {
     const total = lines.reduce((sum, l) => sum.add(Money.of(l.diff_minor, g.currency)), Money.zero(g.currency));
     // Modèle A : VITPAY ne verse jamais de fonds. Un solde créditeur (avoir) n'est pas émis en relevé
     // négatif : les lignes restent en attente et s'imputent sur le prochain relevé positif.
-    if (total.compare(Money.zero(g.currency)) <= 0) return null;
+    if (total.compare(Money.zero(g.currency)) <= 0) {
+      if (total.isNegative()) onDeferred(total);
+      return null;
+    }
     const n = await tx.one<{ n: string }>(`SELECT nextval('commission_statement_seq')::text AS n`);
     const prefix = input.mode === 'sandbox' ? 'TEST-VPC' : 'VPC';
     const st = await tx.one<StatementRow>(
@@ -176,17 +182,22 @@ export class BillingService {
     return rows.map((r) => this.view(r));
   }
 
-  /** Avoir en attente d'imputation (commission déjà facturée puis annulée), par devise et mode. */
+  /**
+   * [R5-6] Avoir en attente d'imputation, NET des commissions pas encore facturées (position réelle
+   * du commerçant), par devise et mode ; affiché seulement s'il est en sa faveur.
+   */
   async pendingCredits(orgId: string) {
     const rows = await this.db.forOrg(orgId, (tx) =>
-      tx.query<{ currency: Currency; mode: string; credit_minor: string }>(
-        `SELECT a.currency, pr.mode, SUM(${DUE} - ${BILLED})::text AS credit_minor
+      tx.query<{ currency: Currency; mode: string; net_minor: string }>(
+        `SELECT a.currency, pr.mode, SUM(${DUE} - ${BILLED})::text AS net_minor
            FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id
-          WHERE a.status = 'succeeded' AND a.vitpay_fee_minor IS NOT NULL AND ${SETTLED} AND ${DUE} < ${BILLED}
-          GROUP BY a.currency, pr.mode`,
+          WHERE a.org_id = $1 AND a.status = 'succeeded' AND a.vitpay_fee_minor IS NOT NULL AND ${SETTLED} AND ${DUE} <> ${BILLED}
+          GROUP BY a.currency, pr.mode
+         HAVING SUM(${DUE} - ${BILLED}) < 0`,
+        [orgId],
       ),
     );
-    return rows.map((r) => ({ mode: r.mode, credit: money(r.credit_minor.replace('-', ''), r.currency) }));
+    return rows.map((r) => ({ mode: r.mode, credit: money(r.net_minor.replace('-', ''), r.currency) }));
   }
 
   async markPaid(actor: AuditActor, id: string, reference: string) {

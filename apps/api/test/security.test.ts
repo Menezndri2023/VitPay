@@ -201,7 +201,7 @@ describe('sécurité et isolation', () => {
 
   it('les identifiants prestataires sont chiffrés en base', async () => {
     const rows = await ownerQuery<{ credentials_enc: string }>(`SELECT credentials_enc FROM provider_accounts LIMIT 1`);
-    expect(rows[0]?.credentials_enc.startsWith('v1.')).toBe(true);
+    expect(rows[0]?.credentials_enc.startsWith('v2.')).toBe(true);
     expect(rows[0]?.credentials_enc).not.toContain('sk_test_');
   });
 });

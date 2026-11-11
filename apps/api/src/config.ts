@@ -1,4 +1,10 @@
+import { Keyring } from './common/crypto';
 import { z } from 'zod';
+
+/** Clé de 32 octets en base64 canonique (44 caractères, un « = » final), sans tolérance. */
+function isStrictKey(k: string): boolean {
+  return /^[A-Za-z0-9+/]{43}=$/.test(k) && Buffer.from(k, 'base64').toString('base64') === k;
+}
 
 const bool = z
   .enum(['true', 'false', '1', '0'])
@@ -13,9 +19,18 @@ const EnvSchema = z
     /** Rôle système (BYPASSRLS) : uniquement pour les chemins transverses justifiés. */
     DATABASE_SYSTEM_URL: z.string().url(),
     /** Clé AES-256 (32 octets, base64) pour chiffrer les identifiants prestataires et secrets MFA. */
-    APP_ENCRYPTION_KEY: z
+    APP_ENCRYPTION_KEY: z.string().refine(isStrictKey, 'APP_ENCRYPTION_KEY must be exactly 32 bytes of canonical base64 (openssl rand -base64 32)'),
+    /** Rotation : anciennes clés (base64, séparées par des virgules), utilisées UNIQUEMENT pour déchiffrer. */
+    APP_ENCRYPTION_KEYS_PREVIOUS: z
       .string()
-      .refine((v) => Buffer.from(v, 'base64').length === 32, 'APP_ENCRYPTION_KEY must be 32 bytes base64'),
+      .default('')
+      .refine((v) => {
+        // [R5-1] Validation stricte : le décodeur base64 de Node est tolérant (un espace au lieu d'une
+        // virgule ferait silencieusement disparaître une clé). Ni élément vide, ni doublon.
+        if (v.trim() === '') return true;
+        const items = v.split(',').map((s) => s.trim());
+        return items.every(isStrictKey) && new Set(items).size === items.length;
+      }, 'APP_ENCRYPTION_KEYS_PREVIOUS must be comma-separated canonical base64 32-byte keys, without empty items or duplicates'),
     PUBLIC_API_URL: z.string().url().default('http://localhost:4710'),
     PAY_BASE_URL: z.string().url().default('http://localhost:3710'),
     /** URL de l'espace Business (liens dans les e-mails : invitation, réinitialisation). */
@@ -67,7 +82,7 @@ const EnvSchema = z
     }
   });
 
-export type AppConfig = z.infer<typeof EnvSchema> & { allowedOrigins: string[]; encryptionKey: Buffer };
+export type AppConfig = z.infer<typeof EnvSchema> & { allowedOrigins: string[]; encryptionKey: Keyring };
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
 
@@ -80,6 +95,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     ...parsed.data,
     allowedOrigins: parsed.data.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean),
-    encryptionKey: Buffer.from(parsed.data.APP_ENCRYPTION_KEY, 'base64'),
+    encryptionKey: new Keyring(
+      Buffer.from(parsed.data.APP_ENCRYPTION_KEY, 'base64'),
+      parsed.data.APP_ENCRYPTION_KEYS_PREVIOUS.split(',').map((s) => s.trim()).filter(Boolean).map((k) => Buffer.from(k, 'base64')),
+    ),
   };
 }

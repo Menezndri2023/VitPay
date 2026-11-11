@@ -226,12 +226,16 @@ describe('relevés de commissions (facturation hors flux)', () => {
     await refund(p3.attemptId, '50.00');
     await ctx.api().post(`/mock-psp/simulate/disputes/${dispute.body.id}/lost`);
     await ctx.psp.drain();
-    // Avoir de 100 (commission de P3) : pas de relevé négatif, report sur le prochain relevé.
-    expect((await fin.post('/v1/admin/billing/statements', body)).body.issued).toHaveLength(0);
+    // Avoir de 100 (commission de P3) : pas de relevé négatif, report signalé à la finance.
+    const deferredRun = (await fin.post('/v1/admin/billing/statements', body)).body;
+    expect(deferredRun.issued).toHaveLength(0);
+    expect(deferredRun.deferred).toEqual([{ orgId, credit: expect.objectContaining({ minor: '100' }) }]);
     const pending = await s.get(`/v1/orgs/${orgId}/billing/statements/pending-credits`);
     expect(pending.body).toEqual([{ mode: 'sandbox', credit: expect.objectContaining({ minor: '100' }) }]);
     const p4 = await pay('400.00'); // commission 800 − avoir 100 = 700
     expect(p4.attemptId).toBeTruthy();
+    // Position nette : 800 dus − 100 d'avoir → plus d'avoir affiché
+    expect((await s.get(`/v1/orgs/${orgId}/billing/statements/pending-credits`)).body).toEqual([]);
     const third = (await fin.post('/v1/admin/billing/statements', body)).body.issued;
     expect(third).toHaveLength(1);
     expect(third[0].fees.minor).toBe('700');

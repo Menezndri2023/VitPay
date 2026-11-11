@@ -24,6 +24,6 @@
 4b. ☑ Images Docker (API, worker, apps) et pile sandbox conteneurisée.
 5. ◐ Observabilité : ☑ identifiant de requête (réponses d'erreur incluses), journaux d'accès JSON expurgés, métriques Prometheus protégées (`/health/metrics`, gauges incidents critiques et files) ; ☐ Sentry, OpenTelemetry, règles d'alerte (dépendent de l'hébergement).
 6. ☑ Tests e2e navigateur (Playwright) : parcours complet, RTL, caisse, admin, mobile.
-7. ☐ Rotation de la clé de chiffrement ; ☑ rotation des secrets de webhooks ; ☑ anti-rejeu TOTP ; ☐ limitation de débit distribuée ; ☑ vérification de l'e-mail à l'inscription.
+7. ☑ Rotation de la clé de chiffrement ; ☑ rotation des secrets de webhooks ; ☑ anti-rejeu TOTP ; ☐ limitation de débit distribuée ; ☑ vérification de l'e-mail à l'inscription.
 8. ☑ Relevés de commissions VITPAY (hors flux, pro forma) — format de facture définitif après E2.
 9. Infrastructure de déploiement (Terraform) selon le choix d'hébergement (CNDP).
