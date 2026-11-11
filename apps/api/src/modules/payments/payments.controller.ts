@@ -16,7 +16,11 @@ import { RefundsService } from './refunds.service';
 
 const UUID = z.string().uuid();
 /** Référence de commande du commerçant : 1 à 64 caractères sûrs, unique par organisation. */
-const MerchantRef = z.string().trim().regex(/^[A-Za-z0-9._:/#-]{1,64}$/, 'Use 1-64 characters: letters, digits and . _ : / # -');
+const MerchantRef = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9._:/#-]{1,64}$/, 'Use 1-64 characters: letters, digits and . _ : / # -')
+  .refine((v) => !/^VP-/i.test(v), 'The VP- prefix is reserved for VITPAY references');
 const CreateRequest = z.object({
   amount: z.string().trim().min(1).max(24),
   merchantReference: MerchantRef.optional(),

@@ -155,7 +155,7 @@ export class PaymentsService {
       const mode = await this.resolveMode(tx, amount.currency);
       // [P5] Une commande = une demande : référence unique par organisation (index unique en base).
       if (input.merchantReference) {
-        const dup = await tx.maybeOne<{ id: string; status: string }>('SELECT id, status FROM payment_requests WHERE merchant_reference = $1', [input.merchantReference]);
+        const dup = await tx.maybeOne<{ id: string; status: string }>('SELECT id, status FROM payment_requests WHERE lower(merchant_reference) = lower($1)', [input.merchantReference]);
         if (dup) throw Errors.conflict('merchant_reference_exists', 'A payment request already exists for this order reference', { requestId: dup.id, status: dup.status });
       }
       const row = await tx.one<PaymentRequestRow>(
@@ -262,7 +262,7 @@ export class PaymentsService {
             AND ($2::text IS NULL OR reference ILIKE '%' || $2 || '%' OR merchant_reference ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%' OR customer_name ILIKE '%' || $2 || '%')
             AND ($3::timestamptz IS NULL OR created_at < $3)
             AND ($5::uuid IS NULL OR pos_id = $5)
-            AND ($6::text IS NULL OR merchant_reference = $6)
+            AND ($6::text IS NULL OR lower(merchant_reference) = lower($6))
           ORDER BY created_at DESC LIMIT $4`,
         [f.status ?? null, f.q ?? null, f.before ?? null, limit + 1, f.posId ?? null, f.merchantReference ?? null],
       ),
@@ -324,9 +324,11 @@ export class PaymentsService {
            OR (target_type = 'payment_attempt' AND target_id = ANY($2::text[]))
            OR (target_type = 'refund' AND target_id = ANY($3::text[]))
            OR (target_type = 'dispute' AND target_id = ANY($4::text[]))
-        ORDER BY id ASC LIMIT 500`,
+        ORDER BY id DESC LIMIT 500`,
       [requestId, attemptIds, refundIds, disputeIds],
     );
+    // [R7-6] Les 500 événements les PLUS RÉCENTS, présentés dans l'ordre chronologique.
+    rows.reverse();
     const statusOf = (v: Record<string, unknown> | null) => (v && typeof v.status === 'string' ? v.status : null);
     return rows.map((e) => ({
       id: e.id,
@@ -722,6 +724,9 @@ export class PaymentsService {
             SELECT id FROM payment_requests p WHERE p.status = 'open' AND p.expires_at <= now()
               AND NOT EXISTS (SELECT 1 FROM payment_attempts a WHERE a.payment_request_id = p.id AND a.status = ANY($2)
                                AND a.created_at > now() - make_interval(mins => $3))
+              -- [R7-7] Paiement validé par le payeur, en cours de traitement bancaire : pas d'expiration,
+              -- quelle que soit sa durée (seul le prestataire conclut).
+              AND NOT EXISTS (SELECT 1 FROM payment_attempts a2 WHERE a2.payment_request_id = p.id AND a2.status IN ('processing','authorized','captured'))
             ORDER BY p.expires_at LIMIT $1 FOR UPDATE SKIP LOCKED)
          RETURNING pr.id, pr.org_id`,
         [limit, ACTIVE_ATTEMPT_STATUSES, ATTEMPT_ABANDON_MINUTES],

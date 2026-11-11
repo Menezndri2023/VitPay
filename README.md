@@ -52,13 +52,17 @@ docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d --build
 # API 4710 · Pay 3710 · Business 3711 · Admin 3712 · e-mails capturés : http://localhost:8025 (Mailpit)
 ```
 
+## Staging (test public, paiements simulés)
+
+Voir [`docs/STAGING.md`](docs/STAGING.md) : VPS + Docker Compose + Caddy (HTTPS automatique), `APP_ENV=staging` (paiements réels impossibles, e-mails capturés par Mailpit), sauvegardes et vérifications automatiques.
+
 ## Tests
 
 ```bash
 pnpm --filter @vitpay/money test     # 9 tests (dont tests de propriétés)
-pnpm --filter @vitpay/api test       # 88 tests (unitaires + intégration sur PostgreSQL réel)
+pnpm --filter @vitpay/api test       # 105 tests (unitaires + intégration sur PostgreSQL réel)
 ./scripts/smoke.sh                   # parcours complet via les apps démarrées (API)
-MAILPIT_URL=http://localhost:8025 pnpm --filter @vitpay/e2e test   # 9 tests navigateur (Playwright + Chrome)
+MAILPIT_URL=http://localhost:8025 pnpm --filter @vitpay/e2e test   # 10 tests navigateur (Playwright + Chrome)
 ```
 
 ## Documentation

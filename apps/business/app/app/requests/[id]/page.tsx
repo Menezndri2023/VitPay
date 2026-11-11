@@ -47,11 +47,14 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
   };
 
   /** Sandbox : réponse différée de la banque pour un paiement en attente (prestataire simulé). */
-  const resolvePending = async (providerRef: string, outcome: 'succeeded' | 'failed') => {
+  const resolvePending = async (attemptId: string, outcome: 'succeeded' | 'failed') => {
     setMsg(null);
-    const res = await fetch(`/api/mock-psp/simulate/payments/${encodeURIComponent(providerRef)}/resolve/${outcome}`, { method: 'POST' });
-    if (!res.ok) setMsg({ kind: 'danger', text: 'Simulation impossible (paiement déjà terminé ?)' });
-    else setMsg({ kind: 'success', text: 'Réponse de la banque simulée : la confirmation arrive par notification du prestataire.' });
+    try {
+      await orgApi(`/sandbox/attempts/${attemptId}/resolve`, { method: 'POST', body: { outcome } });
+      setMsg({ kind: 'success', text: 'Réponse de la banque simulée : la confirmation arrive par notification du prestataire.' });
+    } catch (e) {
+      setMsg({ kind: 'danger', text: e instanceof ApiError ? e.message : 'Simulation impossible' });
+    }
     setTimeout(() => void load(), 1200);
   };
 
@@ -138,12 +141,12 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
                   <td>
                     <StatusBadge status={a.status} label={STATUS_LABELS[a.status]} />
                     {a.failureCode && <div className="vp-small vp-muted">{a.failureCode}</div>}
-                    {r.mode === 'sandbox' && a.status === 'processing' && a.providerCode === 'mock' && a.providerRef && (
+                    {r.mode === 'sandbox' && a.status === 'processing' && a.providerCode === 'mock' && org.role !== 'viewer' && (
                       <div className="vp-row" style={{ gap: 6, marginTop: 6 }}>
-                        <Button variant="ghost" onClick={() => resolvePending(a.providerRef as string, 'succeeded')}>
+                        <Button variant="ghost" onClick={() => resolvePending(a.id, 'succeeded')}>
                           Simuler : banque confirme
                         </Button>
-                        <Button variant="ghost" onClick={() => resolvePending(a.providerRef as string, 'failed')}>
+                        <Button variant="ghost" onClick={() => resolvePending(a.id, 'failed')}>
                           Simuler : banque refuse
                         </Button>
                       </div>

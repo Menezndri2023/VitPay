@@ -50,8 +50,20 @@ export class MockPspService {
     if (!this.config.MOCK_PSP_ENABLED) throw Errors.notFound('Resource');
   }
 
+  /**
+   * [R7-1] Anti-SSRF : hors poste local, le prestataire simulé ne notifie QUE l'endpoint de
+   * webhooks de VITPAY (jamais une adresse arbitraire fournie par un tiers).
+   */
+  private assertAllowedWebhookUrl(url: string): void {
+    if (this.config.appEnv === 'local') return;
+    const base = this.config.MOCK_PSP_INTERNAL_URL ?? this.config.PUBLIC_API_URL;
+    const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/webhooks/providers/mock/[0-9a-f-]{36}$`, 'i');
+    if (!re.test(url)) throw Errors.validation({ webhookUrl: 'Outside local, the mock PSP only notifies the VITPAY provider webhook endpoint' });
+  }
+
   async createMerchant(webhookUrl: string): Promise<{ merchantId: string; apiKey: string; webhookSecret: string }> {
     this.assertEnabled();
+    this.assertAllowedWebhookUrl(webhookUrl);
     const merchantId = `mch_${randomToken(9)}`;
     const apiKey = `sk_test_${randomToken(24)}`;
     const webhookSecret = `whsec_${randomToken(24)}`;
@@ -323,6 +335,12 @@ export class MockPspService {
   }
 
   private async deliver(url: string, secret: string, body: string, attempt = 1): Promise<void> {
+    try {
+      this.assertAllowedWebhookUrl(url); // revérifié à l'envoi (lignes créées avant la règle)
+    } catch {
+      this.logger.warn({ msg: 'mock webhook to a non-VITPAY URL refused' });
+      return;
+    }
     const ts = Math.floor(Date.now() / 1000).toString();
     const signature = `t=${ts},v1=${hmacSha256Hex(secret, `${ts}.${body}`)}`;
     try {

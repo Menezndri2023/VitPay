@@ -129,6 +129,23 @@ Restant (R5-9, défense en profondeur) : lier chaque chiffré à son contexte (t
 | R6-6 | Rôle applicatif en lecture/écriture sur les compteurs (IP des clients) | Accès révoqué, fonction `SECURITY DEFINER` aux arguments bornés, clés HMAC |
 | R6-7 | Méthode `Db.autocommit` contournant les transactions | Supprimée |
 
+## Septième revue indépendante (11/11/2026) — étape 2 (staging, transactions)
+
+| # | Défaut | Correction |
+|---|---|---|
+| R7-1 | **Élevé** — staging public : le prestataire simulé acceptait une URL de notification arbitraire (requêtes du serveur vers des adresses internes) | Hors local, seule l'URL de webhooks VITPAY est acceptée, revérifiée à l'envoi ; outils bruts bloqués par Caddy ; l'espace Business passe par un endpoint authentifié et cloisonné |
+| R7-2 | Verrou « e-mails capturés » contournable via les paramètres de `SMTP_URL` (`service=`, `proxy=`) | Valeur exacte `smtp://mailpit:1025` exigée en staging |
+| R7-3 | `TRUST_PROXY` : liste noire incomplète (`0.0.0.0/0`, `TRUE`, nombre de sauts) | Liste blanche d'adresses ou de plages étroites |
+| R7-4 | `APP_ENV=local` avec `NODE_ENV=production` désactivait les protections | Refusé |
+| R7-5 | Référence de commande : doublon par la casse ; imitation d'une référence VITPAY | Unicité insensible à la casse, préfixe `VP-` réservé (migration 021) |
+| R7-6 | Historique tronqué aux 500 PREMIERS événements | Les 500 plus récents |
+| R7-7 | Demande expirée pendant un traitement bancaire (fausse alerte à la confirmation) | Pas d'expiration tant qu'un paiement est en traitement |
+| R7-8 | Boutons de simulation visibles en lecture seule | Masqués ; endpoint réservé à `requests:create` |
+| R7-10 | Identifiants du seed staging exposés aux journaux collectés | Terminal interactif obligatoire hors local |
+| (constat) | Limitation de débit : la saturation du pool dédié laissait passer les requêtes | Compteur local de repli (limitation maintenue) |
+
+Restant (R7-9, défense en profondeur) : insertion dans le journal d'audit par une fonction `SECURITY DEFINER` calculant l'empreinte, pour qu'une injection SQL sous le rôle applicatif ne puisse pas ajouter de lignes orphelines.
+
 ## À faire avant la production
 
 1. **Test d'intrusion externe** et revue OWASP ASVS niveau 2.

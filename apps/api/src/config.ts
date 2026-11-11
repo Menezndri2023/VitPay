@@ -94,8 +94,9 @@ const EnvSchema = z
         ...env.ALLOWED_ORIGINS.split(',').map((o): [string, string] => ['ALLOWED_ORIGINS', o.trim()]),
       ];
       for (const [k, v] of urls) if (!v.startsWith('https://')) fail(k, `${k} must use HTTPS outside local (${v})`);
-      if (['true', 'uniquelocal', 'loopback'].includes(env.TRUST_PROXY.trim())) {
-        fail('TRUST_PROXY', 'TRUST_PROXY must list the exact reverse-proxy addresses outside local (never true/uniquelocal/loopback)');
+      // [R7-3] Liste blanche : adresses ou plages explicites uniquement (ni mot-clé, ni nombre de sauts, ni /0).
+      if (!isExplicitProxyList(env.TRUST_PROXY)) {
+        fail('TRUST_PROXY', 'TRUST_PROXY must list explicit reverse-proxy IP addresses or narrow CIDR ranges outside local');
       }
     }
     if (appEnv === 'staging') {
@@ -103,17 +104,30 @@ const EnvSchema = z
       if (env.PAYMENTS_LIVE_ENABLED) fail('PAYMENTS_LIVE_ENABLED', 'Live payments are forbidden in staging');
       if (env.LEGAL_SIGNOFF_REF) fail('LEGAL_SIGNOFF_REF', 'LEGAL_SIGNOFF_REF must not be set in staging');
       // Aucun e-mail réel : uniquement la capture Mailpit du réseau interne (ou le journal).
-      if (env.EMAIL_TRANSPORT === 'smtp' && env.SMTP_URL) {
-        let host = '';
-        try {
-          host = new URL(env.SMTP_URL).hostname;
-        } catch {
-          /* signalé ci-dessous */
-        }
-        if (host !== 'mailpit') fail('SMTP_URL', 'In staging, e-mails must go to the internal Mailpit capture (smtp://mailpit:1025)');
+      // [R7-2] Valeur EXACTE : nodemailer lit aussi les paramètres d'URL (service=, proxy=…).
+      if (env.EMAIL_TRANSPORT === 'smtp' && env.SMTP_URL !== 'smtp://mailpit:1025') {
+        fail('SMTP_URL', 'In staging, SMTP_URL must be exactly smtp://mailpit:1025 (internal Mailpit capture)');
       }
     }
+    // [R7-4] Un déploiement en mode production ne peut pas se déclarer « local » (protections désactivées).
+    if (env.APP_ENV === 'local' && env.NODE_ENV === 'production') fail('APP_ENV', 'APP_ENV=local is not allowed with NODE_ENV=production');
   });
+
+/** Liste de proxys approuvés explicite : IPv4/IPv6 ou CIDR étroit (≥ /8 en IPv4, ≥ /32 en IPv6). */
+function isExplicitProxyList(v: string): boolean {
+  const items = v.split(',').map((x) => x.trim()).filter(Boolean);
+  if (!items.length) return false;
+  return items.every((item) => {
+    const [ip, prefix] = item.split('/');
+    const v4 = /^(\d{1,3})(\.\d{1,3}){3}$/.test(ip ?? '') && (ip ?? '').split('.').every((o) => Number(o) <= 255);
+    const v6 = !v4 && /^[0-9a-f:]+$/i.test(ip ?? '') && (ip ?? '').includes(':');
+    if (!v4 && !v6) return false;
+    if (prefix === undefined) return true;
+    if (!/^\d{1,3}$/.test(prefix)) return false;
+    const n = Number(prefix);
+    return v4 ? n >= 8 && n <= 32 : n >= 32 && n <= 128;
+  });
+}
 
 /** Environnement d'exploitation effectif (voir APP_ENV). */
 export function resolveAppEnv(env: { APP_ENV?: 'local' | 'staging' | 'production'; NODE_ENV: string }): 'local' | 'staging' | 'production' {

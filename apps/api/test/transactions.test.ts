@@ -41,8 +41,11 @@ describe('transactions : référence de commande, paiement en attente, historiqu
     // Recherche exacte
     const found = await s.get(`/v1/orgs/${orgId}/payment-requests?merchantReference=CMD-2026-0001`);
     expect(found.body.data.map((r: { id: string }) => r.id)).toEqual([first.body.id]);
-    // Format contrôlé (pas d'espace, de chevron ni de longueur excessive)
-    for (const bad of ['CMD 1', '<script>', 'x'.repeat(65)]) expect((await create({ merchantReference: bad })).status).toBe(422);
+    // Format contrôlé (pas d'espace, de chevron ni de longueur excessive ; préfixe VITPAY réservé)
+    for (const bad of ['CMD 1', '<script>', 'x'.repeat(65), 'VP-ABCD1234', 'vp-1']) expect((await create({ merchantReference: bad })).status).toBe(422);
+    // Insensible à la casse : cmd-2026-0001 est la même commande que CMD-2026-0001
+    expect((await create({ merchantReference: 'cmd-2026-0001' })).body.code).toBe('merchant_reference_exists');
+    expect((await s.get(`/v1/orgs/${orgId}/payment-requests?merchantReference=cmd-2026-0001`)).body.data).toHaveLength(1);
   });
 
   it('la référence de commande figure dans les événements sortants', async () => {
@@ -71,6 +74,34 @@ describe('transactions : référence de commande, paiement en attente, historiqu
     expect((await ctx.api().post(`/mock-psp/simulate/payments/${providerRef}/resolve/failed`)).status).toBe(409);
     const entries = await ownerQuery(`SELECT 1 FROM journal_entries WHERE entry_type = 'payment.succeeded' AND reference_id = $1`, [attemptId]);
     expect(entries).toHaveLength(1);
+  });
+
+  it('paiement en cours de traitement bancaire : la demande n’expire pas, quelle que soit la durée', async () => {
+    const r = await createRequest(s, orgId, '82.00');
+    const { attemptId, providerRef } = await payerActs(ctx, tokenOf(r.payUrl), 'pending');
+    await ownerQuery(`UPDATE payment_requests SET expires_at = now() - interval '1 hour' WHERE id = $1`, [r.id]);
+    await ownerQuery(`UPDATE payment_attempts SET created_at = now() - interval '3 hours' WHERE id = $1`, [attemptId]);
+    const { PaymentsService } = await import('../src/modules/payments/payments.service');
+    await ctx.app.get(PaymentsService).expireRequests();
+    expect((await s.get(`/v1/orgs/${orgId}/payment-requests/${r.id}`)).body.status).toBe('open');
+    await ctx.api().post(`/mock-psp/simulate/payments/${providerRef}/resolve/succeeded`);
+    await ctx.psp.drain();
+    expect((await s.get(`/v1/orgs/${orgId}/payment-requests/${r.id}`)).body.status).toBe('paid');
+    expect(await ownerQuery(`SELECT 1 FROM incidents WHERE type = 'payment_after_close' AND summary LIKE $1`, [`%${r.reference}%`])).toHaveLength(0);
+  });
+
+  it('anti-SSRF : hors local, le prestataire simulé ne notifie que l’endpoint VITPAY', async () => {
+    const cfg = ctx.config as { appEnv: string };
+    cfg.appEnv = 'staging';
+    try {
+      for (const url of ['http://169.254.169.254/latest/meta-data', 'http://mailpit:8025/api/v1/messages', `${ctx.config.PUBLIC_API_URL}/webhooks/providers/mock/x/../../admin`]) {
+        expect((await ctx.api().post('/mock-psp/api/merchants').send({ webhookUrl: url })).status, url).toBe(422);
+      }
+      const ok = `${ctx.config.PUBLIC_API_URL}/webhooks/providers/mock/2b1c6f3e-1111-4222-8333-444455556666`;
+      expect((await ctx.api().post('/mock-psp/api/merchants').send({ webhookUrl: ok })).status).toBe(201);
+    } finally {
+      cfg.appEnv = 'local';
+    }
   });
 
   it('paiement en attente puis refusé par la banque : tentative échouée, demande toujours payable', async () => {
@@ -115,6 +146,19 @@ describe('transactions : référence de commande, paiement en attente, historiqu
     expect(Number(verify[0]?.n)).toBeGreaterThan(10);
     const { AuditService } = await import('../src/modules/audit/audit.service');
     expect((await ctx.app.get(AuditService).verifyChain()).ok).toBe(true);
+  });
+
+  it('outil de simulation de l’espace Business : session du commerçant, tentative de SON organisation uniquement', async () => {
+    const r = await createRequest(s, orgId, '33.00');
+    const { attemptId } = await payerActs(ctx, tokenOf(r.payUrl), 'pending');
+    const other = await registerMerchant(ctx, 'sim-intrus@tx.test', 'Intrus sim');
+    expect((await other.s.post(`/v1/orgs/${other.orgId}/sandbox/attempts/${attemptId}/resolve`, { outcome: 'succeeded' })).status).toBe(404);
+    expect((await ctx.api().post(`/v1/orgs/${orgId}/sandbox/attempts/${attemptId}/resolve`).send({ outcome: 'succeeded' })).status).toBe(401);
+    expect((await s.post(`/v1/orgs/${orgId}/sandbox/attempts/${attemptId}/resolve`, { outcome: 'bogus' })).status).toBe(422);
+    expect((await s.post(`/v1/orgs/${orgId}/sandbox/attempts/${attemptId}/resolve`, { outcome: 'succeeded' })).status).toBe(202);
+    await ctx.psp.drain();
+    expect((await s.get(`/v1/orgs/${orgId}/payment-requests/${r.id}`)).body.status).toBe('paid');
+    expect((await s.post(`/v1/orgs/${orgId}/sandbox/attempts/${attemptId}/resolve`, { outcome: 'failed' })).status).toBe(409);
   });
 
   it('TPE : interface préparée, aucune intégration déclarée', () => {

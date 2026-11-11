@@ -18,6 +18,9 @@ async function main(): Promise<void> {
   const config = loadConfig({ ...process.env, WORKERS_ENABLED: 'false' });
   if (config.appEnv === 'production') throw new Error('Seeding is forbidden in production');
   if (config.appEnv !== 'local' && process.env.SEED_PASSWORD) throw new Error('SEED_PASSWORD is only allowed locally: staging passwords are always random');
+  // [R7-10] Hors local, identifiants affichés UNIQUEMENT dans un terminal interactif : jamais dans un
+  // journal collecté (pilote de journaux Docker, CI). `docker compose run --rm seed` alloue un terminal.
+  if (config.appEnv !== 'local' && !process.stdout.isTTY) throw new Error('Outside local, run the seed in an interactive terminal (docker compose run --rm seed)');
   const app = await createApp(config);
   await app.listen(config.PORT); // le prestataire simulé est appelé en HTTP
   try {

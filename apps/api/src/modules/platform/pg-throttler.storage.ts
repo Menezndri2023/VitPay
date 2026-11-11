@@ -14,14 +14,17 @@ const CACHE_MAX = 10_000;
  *   délais de connexion et d'exécution courts.
  * - Clés = HMAC à clé serveur ([R6-6]) : pas d'IP retrouvable par dictionnaire dans la base.
  * - Cache local des clés bloquées : les 429 répétés ne touchent pas la base.
- * - En cas d'indisponibilité de la base : la requête passe (journal + métrique). Les protections
- *   d'authentification (verrouillage de compte atomique, anti-rejeu TOTP) restent en base.
+ * - [R7] Base indisponible ou saturée : bascule sur un compteur LOCAL à l'instance (même fenêtre,
+ *   même limite) au lieu de laisser passer — une saturation provoquée par une rafale ne désactive
+ *   donc pas la limitation (journal + métrique `vitpay_rate_limit_errors_total`).
  * Fenêtre fixe (et non glissante) : jusqu'à 2× la limite possible à la jonction de deux fenêtres.
  */
 export class PgThrottlerStorage implements ThrottlerStorage, OnModuleDestroy {
   private readonly logger = new Logger('RateLimit');
   private readonly pool: Pool;
   private readonly blocked = new Map<string, { until: number; hits: number }>();
+  /** Compteurs de repli (fenêtre fixe), utilisés uniquement si la base ne répond pas. */
+  private readonly fallback = new Map<string, { hits: number; expiresAt: number; blockedUntil: number }>();
   private readonly secret: string;
 
   constructor(config: AppConfig) {
@@ -67,8 +70,26 @@ export class PgThrottlerStorage implements ThrottlerStorage, OnModuleDestroy {
       return { totalHits: row.hits, timeToExpire, isBlocked, timeToBlockExpire };
     } catch (e) {
       metrics.inc('vitpay_rate_limit_errors_total');
-      this.logger.warn({ msg: 'rate limit storage unavailable: request allowed', err: (e as Error).message });
-      return { totalHits: 0, timeToExpire: Math.ceil(ttl / 1000), isBlocked: false, timeToBlockExpire: 0 };
+      this.logger.warn({ msg: 'rate limit storage unavailable: local fallback counter used', err: (e as Error).message });
+      return this.localIncrement(k, ttl, limit, blockDuration, now);
     }
+  }
+
+  private localIncrement(k: string, ttl: number, limit: number, blockDuration: number, now: number): ThrottlerStorageRecord {
+    let r = this.fallback.get(k);
+    if (!r || (r.expiresAt <= now && r.blockedUntil <= now) || (r.blockedUntil > 0 && r.blockedUntil <= now)) {
+      if (this.fallback.size >= CACHE_MAX) this.fallback.clear();
+      r = { hits: 0, expiresAt: now + ttl, blockedUntil: 0 };
+      this.fallback.set(k, r);
+    }
+    r.hits += 1;
+    if (r.blockedUntil <= now && r.hits > limit) r.blockedUntil = now + (blockDuration > 0 ? blockDuration : Math.max(0, r.expiresAt - now));
+    const isBlocked = r.blockedUntil > now;
+    return {
+      totalHits: r.hits,
+      timeToExpire: Math.ceil(Math.max(0, r.expiresAt - now) / 1000),
+      isBlocked,
+      timeToBlockExpire: isBlocked ? Math.ceil((r.blockedUntil - now) / 1000) : 0,
+    };
   }
 }

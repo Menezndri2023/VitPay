@@ -1,0 +1,166 @@
+# VITPAY STAGING — pile publique de TEST (paiements simulés uniquement, données fictives).
+# Lancement : voir docs/STAGING.md. Toutes les valeurs sensibles viennent de .env (généré sur le
+# serveur par scripts/generate-env.sh, jamais versionné).
+name: vitpay-staging
+
+x-api-env: &api-env
+  NODE_ENV: production
+  APP_ENV: staging
+  PORT: "4710"
+  DATABASE_URL: postgres://vitpay_app:${PG_APP_PASSWORD}@postgres:5432/vitpay
+  DATABASE_SYSTEM_URL: postgres://vitpay_system:${PG_SYSTEM_PASSWORD}@postgres:5432/vitpay
+  APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+  APP_ENCRYPTION_KEYS_PREVIOUS: ${APP_ENCRYPTION_KEYS_PREVIOUS:-}
+  PUBLIC_API_URL: https://api.${STAGING_DOMAIN_SUFFIX}${STAGING_URL_PORT:-}
+  PAY_BASE_URL: https://pay.${STAGING_DOMAIN_SUFFIX}${STAGING_URL_PORT:-}
+  BUSINESS_APP_URL: https://app.${STAGING_DOMAIN_SUFFIX}${STAGING_URL_PORT:-}
+  ALLOWED_ORIGINS: https://pay.${STAGING_DOMAIN_SUFFIX}${STAGING_URL_PORT:-},https://app.${STAGING_DOMAIN_SUFFIX}${STAGING_URL_PORT:-},https://admin.${STAGING_DOMAIN_SUFFIX}${STAGING_URL_PORT:-}
+  MOCK_PSP_ENABLED: "true"
+  MOCK_PSP_INTERNAL_URL: http://api:4710
+  PAYMENTS_LIVE_ENABLED: "false" # verrouillé : APP_ENV=staging refuse toute autre valeur
+  COOKIE_SECURE: "true"
+  ALLOW_PRIVATE_WEBHOOK_URLS: "false"
+  EMAIL_TRANSPORT: smtp
+  SMTP_URL: smtp://mailpit:1025 # capture uniquement : aucun e-mail ne quitte le serveur
+  EMAIL_FROM: VITPAY STAGING <no-reply@staging.vitpay.invalid>
+  # Seuls Caddy et les apps Next (adresses fixes du réseau « edge ») sont approuvés pour X-Forwarded-For.
+  TRUST_PROXY: 172.30.10.10,172.30.10.11,172.30.10.12,172.30.10.13
+  METRICS_TOKEN: ${METRICS_TOKEN}
+
+x-web-build: &web-build
+  context: ../..
+  dockerfile: infra/docker/web.Dockerfile
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PG_SUPERUSER_PASSWORD}
+      POSTGRES_DB: vitpay
+      PG_OWNER_PASSWORD: ${PG_OWNER_PASSWORD}
+      PG_APP_PASSWORD: ${PG_APP_PASSWORD}
+      PG_SYSTEM_PASSWORD: ${PG_SYSTEM_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro
+    # AUCUN port publié : la base n'est joignable que depuis le réseau interne.
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vitpay"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: { context: ../.., dockerfile: infra/docker/api.Dockerfile }
+    image: vitpay/api:staging
+    command: ["node", "dist/src/database/migrate.cli.js"]
+    environment:
+      DATABASE_OWNER_URL: postgres://vitpay_owner:${PG_OWNER_PASSWORD}@postgres:5432/vitpay
+    networks: [internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    image: vitpay/api:staging
+    restart: unless-stopped
+    environment:
+      <<: *api-env
+      WORKERS_ENABLED: "false"
+    networks: [internal, edge]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    image: vitpay/api:staging
+    restart: unless-stopped
+    environment:
+      <<: *api-env
+      WORKERS_ENABLED: "true"
+      PORT: "4711"
+    # « edge » : accès Internet sortant pour les webhooks vers les URL de test des commerçants
+    # (protégés anti-SSRF). Adresse non approuvée par TRUST_PROXY.
+    networks: [internal, edge]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  pay:
+    build: { <<: *web-build, args: { APP: pay, NEXT_PUBLIC_VITPAY_ENV: staging } }
+    image: vitpay/pay:staging
+    restart: unless-stopped
+    environment: { PORT: "3710" }
+    networks: { edge: { ipv4_address: 172.30.10.11 } }
+    depends_on: [api]
+
+  business:
+    build: { <<: *web-build, args: { APP: business, NEXT_PUBLIC_VITPAY_ENV: staging } }
+    image: vitpay/business:staging
+    restart: unless-stopped
+    environment: { PORT: "3711" }
+    networks: { edge: { ipv4_address: 172.30.10.12 } }
+    depends_on: [api]
+
+  admin:
+    build: { <<: *web-build, args: { APP: admin, NEXT_PUBLIC_VITPAY_ENV: staging } }
+    image: vitpay/admin:staging
+    restart: unless-stopped
+    environment: { PORT: "3712" }
+    networks: { edge: { ipv4_address: 172.30.10.13 } }
+    depends_on: [api]
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    environment:
+      MP_MAX_MESSAGES: "2000"
+      MP_SMTP_RELAY_HOST: "" # aucun relais : les messages ne sortent jamais
+    # Interface accessible UNIQUEMENT depuis le serveur (tunnel SSH, voir docs/STAGING.md).
+    ports: ["127.0.0.1:8025:8025"]
+    networks: [internal, mailpit_ui]
+
+  # Données de démonstration (une fois) : docker compose run --rm seed
+  # Identifiants ALÉATOIRES affichés une seule fois dans le terminal (aucun journal conservé).
+  seed:
+    image: vitpay/api:staging
+    profiles: [tools]
+    command: ["node", "dist/src/database/seed.cli.js"]
+    environment:
+      <<: *api-env
+      WORKERS_ENABLED: "false"
+      PORT: "4799"
+    networks: [internal, edge]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  # Seul point d'entrée public : HTTPS automatique (Let's Encrypt), X-Forwarded-For écrasé.
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      STAGING_DOMAIN_SUFFIX: ${STAGING_DOMAIN_SUFFIX}
+      ADMIN_BASIC_AUTH_USER: ${ADMIN_BASIC_AUTH_USER}
+      ADMIN_BASIC_AUTH_HASH: ${ADMIN_BASIC_AUTH_HASH}
+      CADDY_GLOBAL_EXTRA: ${CADDY_GLOBAL_EXTRA:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: { edge: { ipv4_address: 172.30.10.10 } }
+    depends_on: [api, pay, business, admin]
+
+networks:
+  internal:
+    internal: true # aucun accès Internet pour la base et Mailpit
+  mailpit_ui:
+    # Réseau dédié à la publication locale (127.0.0.1) de l'interface Mailpit.
+  edge:
+    ipam:
+      config: [{ subnet: 172.30.10.0/24 }]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

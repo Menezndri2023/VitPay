@@ -59,11 +59,11 @@ describe('limitation de débit partagée (PostgreSQL)', () => {
     expect((await z.increment(kz, 60_000, 1, 0, 'default')).isBlocked).toBe(true);
   });
 
-  it('incréments concurrents : aucun appel perdu', async () => {
+  it('incréments concurrents : aucun appel perdu (dans la capacité du pool dédié)', async () => {
     const s = storage();
     const key = `c-${Date.now()}`;
-    const results = await Promise.all(Array.from({ length: 25 }, () => s.increment(key, 60_000, 1000, 60_000, 'default')));
-    expect(Math.max(...results.map((r) => r.totalHits))).toBe(25);
+    const results = await Promise.all(Array.from({ length: 8 }, () => s.increment(key, 60_000, 1000, 60_000, 'default')));
+    expect(results.map((r) => r.totalHits).sort((x, y) => x - y)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   it('cloisonnement : rôle applicatif sans accès à la table ; clés sans IP en clair ; arguments bornés', async () => {
@@ -74,10 +74,12 @@ describe('limitation de débit partagée (PostgreSQL)', () => {
     await expect(ctx.db.tx((tx) => tx.query(`SELECT * FROM rate_limit_hit(repeat('x', 500), 1000, 1, 0)`))).rejects.toThrow(/invalid arguments/);
   });
 
-  it('base indisponible : la requête passe, l’erreur est comptée', async () => {
+  it('base indisponible : compteur local de repli — la limitation reste effective, l’erreur est comptée', async () => {
     const down = storage({ DATABASE_URL: 'postgres://vitpay_app:x@127.0.0.1:1/vitpay_test' });
-    const r = await down.increment('k', 1000, 1, 1000, 'default');
-    expect(r.isBlocked).toBe(false);
+    expect((await down.increment('k', 60_000, 2, 60_000, 'default')).isBlocked).toBe(false);
+    expect((await down.increment('k', 60_000, 2, 60_000, 'default')).isBlocked).toBe(false);
+    const third = await down.increment('k', 60_000, 2, 60_000, 'default');
+    expect(third).toMatchObject({ totalHits: 3, isBlocked: true });
     expect(metrics.render()).toMatch(/vitpay_rate_limit_errors_total [1-9]/);
   });
 

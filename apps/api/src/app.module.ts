@@ -28,6 +28,7 @@ import { JobsService } from './modules/jobs/jobs.service';
 import { LedgerService } from './modules/ledger/ledger.service';
 import { MockPspController } from './modules/mock-psp/mock-psp.controller';
 import { MockPspService } from './modules/mock-psp/mock-psp.service';
+import { SandboxToolsController } from './modules/mock-psp/sandbox-tools.controller';
 import { NotificationsConsumer } from './modules/notifications/notifications.consumer';
 import { OrganizationsController } from './modules/organizations/organizations.controller';
 import { OrganizationsService } from './modules/organizations/organizations.service';
@@ -73,7 +74,7 @@ export class AppModule {
       AdminKybDocumentsController,
       DevelopersController,
     ];
-    if (config.MOCK_PSP_ENABLED) controllers.push(MockPspController);
+    if (config.MOCK_PSP_ENABLED) controllers.push(MockPspController, SandboxToolsController);
 
     return {
       module: AppModule,

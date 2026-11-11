@@ -1,0 +1,8 @@
+# Répétition générale LOCALE du staging (avant commande du VPS) : certificats émis par l'autorité
+# locale de Caddy, ports non privilégiés, aucun conflit avec la pile sandbox.
+# docker compose -f docker-compose.yml -f docker-compose.rehearsal.yml up -d --build
+services:
+  caddy:
+    ports: !override ["18080:80", "18443:443"]
+  mailpit:
+    ports: !override ["127.0.0.1:18025:8025"]
