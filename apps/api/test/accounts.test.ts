@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { EmailService } from '../src/modules/email/email.service';
+import { AccountCleanupService } from '../src/modules/identity/account-cleanup.service';
 import { connectMock, verificationToken, createRequest, login, ownerQuery, PASSWORD, payerActs, registerMerchant, resetDb, Session, startApp, TestCtx, tokenOf } from './helpers';
 
 describe('e-mails, mot de passe oublié, invitations', () => {
@@ -49,6 +50,56 @@ describe('e-mails, mot de passe oublié, invitations', () => {
     expect((await s.get('/v1/auth/me')).body.user.emailVerified).toBe(true);
     expect((await s.post(`/v1/orgs/${orgId}/providers`, { providerCode: 'mock', mode: 'sandbox' })).status).toBe(201);
     expect((await s.post('/v1/auth/email/resend')).status).toBe(409);
+  });
+
+  it('compte non vérifié libéré après 7 jours : adresse réutilisable, organisation fermée, audit sans adresse', async () => {
+    const { orgId } = await registerMerchant(ctx, 'squat@acc.test', 'Org squat', { verify: false });
+    await registerMerchant(ctx, 'old-verified@acc.test', 'Org ancienne');
+    await ownerQuery(`UPDATE users SET created_at = now() - interval '8 days' WHERE email IN ('squat@acc.test','old-verified@acc.test')`);
+    const released = await ctx.app.get(AccountCleanupService).releaseUnverified();
+    expect(released).toBe(1);
+    expect((await ctx.api().post('/v1/auth/login').send({ email: 'squat@acc.test', password: PASSWORD })).status).toBe(401);
+    expect((await ownerQuery<{ status: string }>(`SELECT status FROM organizations WHERE id = $1`, [orgId]))[0]?.status).toBe('closed');
+    const audit = await ownerQuery<{ m: string }>(`SELECT metadata::text AS m FROM audit_log WHERE action = 'auth.unverified_account_released'`);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.m).not.toContain('squat@acc.test');
+    // [R4-C5] Plus d'adresse en clair dans les e-mails sortants ni de nom d'organisation
+    expect(await ownerQuery(`SELECT 1 FROM outbound_emails WHERE to_address = 'squat@acc.test'`)).toHaveLength(0);
+    expect((await ownerQuery<{ d: string }>(`SELECT display_name AS d FROM organizations WHERE id = $1`, [orgId]))[0]?.d).toBe('Organisation fermée');
+    // Le vrai titulaire peut maintenant s'inscrire ; le compte vérifié ancien n'est pas touché.
+    await registerMerchant(ctx, 'squat@acc.test', 'Org du vrai titulaire');
+    expect((await ctx.api().post('/v1/auth/login').send({ email: 'old-verified@acc.test', password: PASSWORD })).status).toBe(200);
+    expect(await ctx.app.get(AccountCleanupService).releaseUnverified()).toBe(0);
+  });
+
+  it('mode réel : invitations refusées tant que le KYB n’est pas vérifié', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'livekyb@acc.test', 'Org live');
+    const cfg = ctx.config as { PAYMENTS_LIVE_ENABLED: boolean };
+    cfg.PAYMENTS_LIVE_ENABLED = true;
+    try {
+      const r = await s.post(`/v1/orgs/${orgId}/invitations`, { email: 'team@acc.test', role: 'viewer' });
+      expect(r.status).toBe(403);
+      expect(r.body.code).toBe('kyb_required');
+      // [R4-C3] Ajout direct d'un membre existant : même règle
+      await registerMerchant(ctx, 'direct@acc.test', 'Org direct');
+      expect((await s.post(`/v1/orgs/${orgId}/members`, { email: 'direct@acc.test', role: 'viewer' })).body.code).toBe('kyb_required');
+      // [R4-C4] Invitation émise en sandbox, acceptée après le passage en réel : refusée
+      cfg.PAYMENTS_LIVE_ENABLED = false;
+      expect((await s.post(`/v1/orgs/${orgId}/invitations`, { email: 'early@acc.test', role: 'viewer' })).status).toBe(201);
+      await email.processQueue();
+      const early = lastLink('early@acc.test', /\/invite\/([A-Za-z0-9_-]+)/);
+      cfg.PAYMENTS_LIVE_ENABLED = true;
+      const acc = await ctx.api().post(`/v1/invitations/${early}/register`).send({ fullName: 'Arrivé Tôt', password: PASSWORD });
+      expect(acc.body.code).toBe('kyb_required');
+      expect(await ownerQuery(`SELECT 1 FROM users WHERE email = 'early@acc.test'`)).toHaveLength(0); // aucun compte orphelin
+
+      await ownerQuery(`UPDATE organizations SET kyb_status = 'verified' WHERE id = $1`, [orgId]);
+      expect((await s.post(`/v1/orgs/${orgId}/invitations`, { email: 'team@acc.test', role: 'viewer' })).status).toBe(201);
+      expect((await s.post(`/v1/orgs/${orgId}/members`, { email: 'direct@acc.test', role: 'viewer' })).status).toBe(201);
+      expect((await ctx.api().post(`/v1/invitations/${early}/register`).send({ fullName: 'Arrivé Tôt', password: PASSWORD })).status).toBe(201);
+    } finally {
+      cfg.PAYMENTS_LIVE_ENABLED = false;
+    }
   });
 
   it('mot de passe oublié : réponse identique, lien à usage unique, sessions révoquées', async () => {

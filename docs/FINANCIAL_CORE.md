@@ -37,6 +37,7 @@ VITPAY **ne détient aucun fonds**. Le ledger décrit, pour chaque organisation,
 | Litige ouvert D | dispute_reserve D | provider_receivable D |
 | Litige gagné | provider_receivable D | dispute_reserve D |
 | Litige perdu | chargeback_losses D | dispute_reserve D |
+| Commission annulée W (remboursement confirmé ou litige perdu) | vitpay_fees_payable W | vitpay_fees W |
 | Règlement constaté (net N) | bank_settled N | provider_receivable N |
 
 Exemple : 500,00 MAD avec 1,5 % de frais donne `gross_sales` = 50000, `provider_fees` = 750 et `provider_receivable` = 49250. Après rapprochement, `bank_settled` = 49250 et `provider_receivable` = 0.
@@ -93,11 +94,17 @@ Pour chaque ligne du rapport du prestataire, le résultat est `matched`, `missin
 
 La commission (`vitpay_fee_bps` par organisation, modifiable à quatre yeux) est calculée à la confirmation (`HALF_UP`) et inscrite au ledger miroir (`vitpay_fees` / `vitpay_fees_payable`). Elle est **facturée séparément** par des relevés de commissions :
 
-- Un relevé couvre une période (jours calendaires de Casablanca), une organisation, une devise et un mode (sandbox ou live).
-- Un paiement ne peut figurer que dans **un seul relevé actif** (index unique partiel) : réémettre la même période ne refacture rien.
-- Statuts : `issued` → `paid` (référence du règlement reçu) ou `void`. L'annulation rend les paiements de nouveau facturables.
+- Un relevé est arrêté à une date de fin (jours calendaires de Casablanca) et couvre une organisation, une devise et un mode (sandbox ou live).
+- Pour chaque paiement confirmé au plus tard à cette date et au montant définitif, le relevé porte **l'écart entre la commission nette due et le total déjà facturé** (relevés non annulés) : débit si positif, avoir si négatif. Réémettre ne refacture rien (écart nul) ; les paiements reportés sont rattrapés ; l'annulation d'un relevé est corrigée à l'émission suivante.
+- Émissions simultanées sérialisées par un verrou consultatif (organisation, devise, mode).
+- Statuts : `issued` → `paid` (référence du règlement reçu ; pour un relevé négatif, référence de l'imputation ou du remboursement de l'avoir) ou `void`.
+- Pas de rétroactivité : les remboursements et litiges antérieurs à la migration 015 (environnements de test uniquement) ne sont pas recalculés.
 - Document **pro forma** tant que le format de facture et la TVA ne sont pas validés (COMPLIANCE E2).
-- **À décider (produit et juridique)** : la commission est-elle due sur un paiement remboursé ou perdu en litige ? Aujourd'hui, elle est maintenue.
+- **Décision du 11/11/2026 (ADR-012)** : aucune commission sur la part remboursée ou perdue en litige.
+  - Part annulée = commission × (remboursements confirmés + litiges perdus) / montant payé ; la commission restante est arrondie à l'inférieur (au profit du commerçant). Cumul stocké dans `payment_attempts.vitpay_fee_waived_minor`, contre-écriture `vitpay_fee.waived` au ledger (idempotente par remboursement ou litige).
+  - Facturation reportée tant qu'un remboursement est en cours ou qu'un litige est ouvert.
+  - Commission déjà facturée puis annulée : **ligne d'avoir** (montant négatif) au relevé suivant ; un relevé peut être un avoir global.
+  - À revoir si des frais de service fixes sont introduits (COMPLIANCE A3/E2).
 
 ## Tests
 

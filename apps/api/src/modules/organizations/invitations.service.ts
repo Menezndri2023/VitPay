@@ -8,7 +8,7 @@ import { EmailService, layout } from '../email/email.service';
 import { ClientMeta } from '../identity/auth.service';
 import { hashPassword, passwordPolicyError } from '../identity/password';
 import { OrgRole } from '../identity/permissions';
-import { toCamel } from './organizations.service';
+import { assertTeamGrowthAllowed, toCamel } from './organizations.service';
 
 const INVITE_TTL_DAYS = 7;
 const MAX_INVITES_PER_DAY = 20;
@@ -59,6 +59,8 @@ export class InvitationsService {
           `UPDATE org_invitations SET revoked_at = now() WHERE lower(email) = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at <= now()`,
           [email],
         );
+        // Décision produit du 11/11/2026 (ADR-012) : en mode réel, pas d'équipe avant un KYB vérifié.
+        await assertTeamGrowthAllowed(tx, orgId, this.config.PAYMENTS_LIVE_ENABLED);
         const orgRow = await tx.one<{ display_name: string }>('SELECT display_name FROM organizations WHERE id = $1', [orgId]);
         const inviterRow = await tx.one<{ full_name: string }>('SELECT full_name FROM users WHERE id = $1', [actor.userId]);
         const org = { display_name: mailSafe(orgRow.display_name) };
@@ -140,6 +142,8 @@ export class InvitationsService {
     if (inv.user_exists) throw Errors.conflict('account_exists', 'An account already exists for this email; sign in to accept');
     const policy = passwordPolicyError(input.password, inv.email);
     if (policy) throw Errors.validation({ password: policy });
+    // Contrôle anticipé (revérifié dans consume) : pas de compte créé si l'adhésion sera refusée.
+    await this.db.system((tx) => assertTeamGrowthAllowed(tx, inv.org_id, this.config.PAYMENTS_LIVE_ENABLED));
     const hash = await hashPassword(input.password);
     const userId = await this.db.system(async (tx) => {
       // Le lien d'invitation, reçu sur cette adresse, vaut vérification de l'e-mail.
@@ -157,6 +161,9 @@ export class InvitationsService {
         [inv.id, userId],
       );
       if (!r.length) throw new AppError('invalid_invitation', 404, 'Invitation not found or expired');
+      // [R4-C4] Revérifié à l'acceptation : une invitation émise avant le passage en réel (ou avant un
+      // KYB rejeté, une suspension) ne contourne pas la règle.
+      await assertTeamGrowthAllowed(tx, inv.org_id, this.config.PAYMENTS_LIVE_ENABLED);
       await tx.query(`INSERT INTO memberships (org_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [inv.org_id, userId, inv.role]);
       // [R3-4] Le lien d'invitation, reçu sur cette adresse, vaut vérification de l'e-mail.
       await tx.query(`UPDATE users SET email_verified_at = coalesce(email_verified_at, now()) WHERE id = $1`, [userId]);

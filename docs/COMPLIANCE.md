@@ -20,6 +20,9 @@ Ce que le code impose déjà pour rester dans ce périmètre :
 | Mode `live` refusé tant que `PAYMENTS_LIVE_ENABLED=false` | [`provider-registry.ts`](../apps/api/src/modules/providers/provider-registry.ts), [`config.ts`](../apps/api/src/config.ts) |
 | `PAYMENTS_LIVE_ENABLED=true` impossible sans `LEGAL_SIGNOFF_REF` (référence de l'avis juridique) | [`config.ts`](../apps/api/src/config.ts) |
 | Prestataire simulé interdit en production | [`config.ts`](../apps/api/src/config.ts) |
+| Invitations d'équipe en mode réel : KYB vérifié exigé (ADR-012) | [`invitations.service.ts`](../apps/api/src/modules/organizations/invitations.service.ts) |
+| Aucune commission sur la part remboursée ou perdue en litige ; avoir si déjà facturée (ADR-012) | [`billing.service.ts`](../apps/api/src/modules/billing/billing.service.ts) |
+| Comptes jamais vérifiés libérés après 7 jours, données minimisées (C3) | [`account-cleanup.service.ts`](../apps/api/src/modules/identity/account-cleanup.service.ts) |
 | Compte `live` exige un KYB vérifié | [`organizations.service.ts`](../apps/api/src/modules/organizations/organizations.service.ts) |
 | Aucun compte de cantonnement, solde, portefeuille, transfert ou retrait dans le modèle de données | Schéma ([`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md)) |
 | Aucune donnée de carte, aucun PIN, mot de passe bancaire ni OTP ne transite par VITPAY : la page de paiement est hébergée par le prestataire | Parcours payeur ([`PAYMENT_FLOWS.md`](PAYMENT_FLOWS.md)) |
@@ -35,7 +38,7 @@ Chaque ligne doit recevoir une **réponse écrite** (avocat, Bank Al-Maghrib, CN
 |---|---|---|---|
 | A1 | Le modèle A (logiciel + redirection vers le prestataire du commerçant, aucun flux de fonds) est-il **hors du champ des services de paiement** ? | ☐ | |
 | A2 | Le fait de **choisir le prestataire** (routage) et de recevoir les confirmations constitue-t-il une activité réglementée ? | ☐ | |
-| A3 | La **facturation d'une commission proportionnelle** au volume encaissé change-t-elle la qualification ? Faut-il un forfait ou un abonnement ? | ☐ | |
+| A3 | La **facturation d'une commission proportionnelle** au volume encaissé change-t-elle la qualification ? Faut-il un forfait ou un abonnement ? Des **frais de service fixes** (non annulés en cas de remboursement) sont-ils possibles ? Aujourd'hui : commission annulée sur la part remboursée ou perdue en litige (ADR-012) | ☐ | |
 | A4 | Faut-il une déclaration, une notification ou un échange préalable avec BAM pour un prestataire technique ? | ☐ | |
 | A5 | Conditions d'un futur **modèle B** : mandataire ou agent d'établissement de paiement, apporteur d'affaires. Et d'un **modèle C** : agrément, capital minimum, gouvernance, délais. | ☐ | |
 

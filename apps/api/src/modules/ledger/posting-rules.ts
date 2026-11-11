@@ -93,3 +93,33 @@ export function settlementEntry(p: { orgId: string; attemptId: string; settlemen
     ],
   };
 }
+
+/**
+ * Commission VITPAY annulée sur la part remboursée ou perdue en litige (décision produit du
+ * 11/11/2026) : contre-passation partielle de la charge et de la dette de commission.
+ */
+export function vitpayFeeWaivedEntry(p: { orgId: string; attemptId: string; cause: { type: 'refund' | 'dispute'; id: string }; amount: Money }): EntryInput {
+  return {
+    orgId: p.orgId,
+    entryType: 'vitpay_fee.waived',
+    referenceType: 'payment_attempt',
+    referenceId: p.attemptId,
+    idempotencyKey: `vitpay_fee.waived:${p.cause.type}:${p.cause.id}`,
+    description: p.cause.type === 'refund' ? 'Commission VITPAY annulée (remboursement)' : 'Commission VITPAY annulée (litige perdu)',
+    postings: [
+      { account: 'VITPAY_FEES_PAYABLE', direction: 'debit', amount: p.amount },
+      { account: 'VITPAY_FEES', direction: 'credit', amount: p.amount },
+    ],
+  };
+}
+
+/**
+ * Part de la commission annulée : commission × (montant remboursé ou perdu) / montant payé,
+ * arrondie au profit du commerçant (la commission restante est arrondie à l'inférieur).
+ */
+export function waivedFeeTarget(fee: Money, paid: Money, reduced: Money): Money {
+  if (fee.isZero() || paid.isZero()) return Money.zero(fee.currency);
+  const cut = reduced.compare(paid) > 0 ? paid : reduced;
+  const remainingFee = (fee.minor * (paid.minor - cut.minor)) / paid.minor; // division entière = arrondi inférieur
+  return Money.of(fee.minor - remainingFee, fee.currency);
+}

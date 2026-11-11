@@ -320,7 +320,7 @@ function StatementList() {
             </span>
           </span>
           <span className="vp-row" style={{ gap: 8 }}>
-            <strong>{formatMoney(s.fees)}</strong>
+            <strong>{formatMoney(s.fees)}{s.fees.minor.startsWith('-') ? ' (avoir)' : ''}</strong>
             <StatusBadge status={s.status === 'issued' ? 'pending' : s.status === 'paid' ? 'paid' : 'cancelled'} label={s.status === 'issued' ? 'à régler' : s.status === 'paid' ? 'réglé' : 'annulé'} />
           </span>
         </div>

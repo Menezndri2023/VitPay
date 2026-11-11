@@ -55,6 +55,7 @@ export interface PaymentAttemptRow {
   currency: Currency;
   provider_fee_minor: string | null;
   vitpay_fee_minor: string | null;
+  vitpay_fee_waived_minor?: string;
   checkout_url: string | null;
   failure_code: string | null;
   failure_message: string | null;
@@ -206,6 +207,7 @@ export class PaymentsService {
       amount: money(a.amount_minor, a.currency),
       providerFee: a.provider_fee_minor === null ? null : money(a.provider_fee_minor, a.currency),
       vitpayFee: a.vitpay_fee_minor === null ? null : money(a.vitpay_fee_minor, a.currency),
+      vitpayFeeWaived: money(a.vitpay_fee_waived_minor ?? '0', a.currency),
       failureCode: a.failure_code,
       settlementStatus: a.settlement_status,
       settledAt: a.settled_at?.toISOString() ?? null,

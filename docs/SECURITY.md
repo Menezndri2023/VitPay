@@ -73,7 +73,7 @@ Durcissements associés :
 - Les jetons de 20 caractères et plus sont masqués dans les journaux.
 - La date de dernière utilisation d'une clé API n'est mise à jour qu'une fois par minute.
 
-Points ouverts : exiger un KYB vérifié avant les invitations en mode réel (décision produit) ; rotation de la clé de chiffrement `APP_ENCRYPTION_KEY` (rechiffrement des secrets) ; risque résiduel de pré-enregistrement : un compte non vérifié au nom d'une victime bloque son adresse — la victime le récupère par « mot de passe oublié », mais l'organisation créée par l'usurpateur reste rattachée (procédure support à définir : purge des comptes non vérifiés après 7 jours).
+Points ouverts : rotation de la clé de chiffrement `APP_ENCRYPTION_KEY` (rechiffrement des secrets) ; pré-enregistrement d'une adresse : le compte non vérifié est libéré après 7 jours (ADR-012), ou plus tôt par « mot de passe oublié » si la victime le souhaite.
 
 ## Troisième revue indépendante (11/11/2026) — vérification e-mail et rotation des secrets
 
@@ -87,6 +87,20 @@ Points ouverts : exiger un KYB vérifié avant les invitations en mode réel (d�
 | R3-6 | Page de confirmation validée à l'ouverture (analyseurs de liens des messageries) | Confirmation par clic explicite (e2e) |
 | R3-7 | Deux rotations simultanées : le premier secret remis devenait « ancien » | Seconde rotation refusée (409) pendant 10 s |
 | R3-8 | Le rôle applicatif pouvait insérer un jeton de vérification pour n'importe quel compte | Jeton créé par le rôle système après l'inscription ; droit retiré (migration 014) |
+
+## Quatrième revue indépendante (11/11/2026) — commission, KYB d'équipe, libération des comptes
+
+| # | Défaut | Correction |
+|---|---|---|
+| R4-C1 | **Élevé** — annuler un relevé dont la commission avait déjà donné lieu à un avoir créditait deux fois le commerçant | Facturation par écart (dû − déjà facturé) : l'émission suivante rétablit le dû (`admin.test.ts`) |
+| R4-C2 | **Élevé** — un paiement reporté (remboursement en cours, litige ouvert) n'était jamais facturé après résolution | Rattrapage : tout paiement confirmé avant la fin de période et au montant définitif est régularisé |
+| R4-C3 | Ajout direct d'un membre sans KYB en mode réel | Même contrôle que les invitations ; ni compte non vérifié, ni compte désactivé |
+| R4-C4 | Invitation émise avant le passage en réel acceptée sans KYB | Contrôle revérifié à l'acceptation, avant toute création de compte |
+| R4-C5 | Données personnelles restantes après libération (e-mails sortants, nom d'organisation, IP de session, empreinte réversible par dictionnaire) | Expurgées ; empreinte HMAC à clé serveur |
+| R4-P1 | Double avoir possible lors de deux émissions simultanées | Verrou consultatif par organisation, devise et mode |
+| R4-P2 | Vérification d'un compte libéré ; ajout d'un compte non vérifié à une organisation pour empêcher sa libération | Refusés |
+
+Résiduel connu : le journal d'audit (immuable) conserve le nom d'organisation saisi à l'inscription d'un compte libéré — à couvrir par la durée de conservation de l'audit (COMPLIANCE C3).
 
 ## À faire avant la production
 

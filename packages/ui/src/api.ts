@@ -20,6 +20,7 @@ export interface ApiOptions {
 /** Messages en français pour les refus que l'utilisateur peut corriger lui-même. */
 const FRIENDLY: Record<string, string> = {
   email_not_verified: 'Confirmez d’abord votre adresse e-mail avec le lien reçu.',
+  kyb_required: 'Votre dossier KYB doit être vérifié avant d’inviter des collaborateurs.',
 };
 
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {

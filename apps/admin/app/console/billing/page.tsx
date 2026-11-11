@@ -108,7 +108,7 @@ export default function BillingPage() {
                     {s.periodStart} → {s.periodEnd}
                     <div className="vp-muted">{s.lineCount} paiement(s) · émis {formatDate(s.issuedAt)}</div>
                   </td>
-                  <td style={{ fontWeight: 600 }}>{formatMoney(s.fees)}</td>
+                  <td style={{ fontWeight: 600 }}>{formatMoney(s.fees)}{s.fees.minor.startsWith('-') ? ' (avoir)' : ''}</td>
                   <td>
                     <StatusBadge status={s.status === 'issued' ? 'pending' : s.status === 'paid' ? 'paid' : 'cancelled'} label={s.status === 'issued' ? 'émis' : s.status === 'paid' ? 'encaissé' : 'annulé'} />
                     {s.paymentReference && <div className="vp-small vp-muted">{s.paymentReference}</div>}

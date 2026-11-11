@@ -66,7 +66,9 @@ export class EmailVerificationService {
   async verify(token: string, meta: ClientMeta): Promise<void> {
     await this.db.system(async (tx) => {
       const r = await tx.maybeOne<{ id: string; user_id: string }>(
-        `SELECT id, user_id FROM email_verifications WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now() FOR UPDATE`,
+        `SELECT v.id, v.user_id FROM email_verifications v JOIN users u ON u.id = v.user_id
+          WHERE v.token_hash = $1 AND v.used_at IS NULL AND v.expires_at > now() AND u.released_at IS NULL AND u.status = 'active'
+          FOR UPDATE OF v, u`,
         [sha256(token)],
       );
       if (!r) throw new AppError('invalid_token', 400, 'Invalid or expired link');

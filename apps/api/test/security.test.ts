@@ -48,8 +48,8 @@ describe('sécurité et isolation', () => {
 
   it('rôles : un caissier ne peut ni rembourser ni gérer les prestataires', async () => {
     const owner = await registerMerchant(ctx, 'owner@roles.test');
-    await ctx.api().post('/v1/auth/register').send({ email: 'cashier@roles.test', password: PASSWORD, fullName: 'Caissier', organizationName: 'Perso' });
-    await owner.s.post(`/v1/orgs/${owner.orgId}/members`, { email: 'cashier@roles.test', role: 'cashier' });
+    await registerMerchant(ctx, 'cashier@roles.test', 'Perso');
+    expect((await owner.s.post(`/v1/orgs/${owner.orgId}/members`, { email: 'cashier@roles.test', role: 'cashier' })).status).toBe(201);
     const cashier = (await login(ctx, 'cashier@roles.test')).s;
     expect((await cashier.get(`/v1/orgs/${owner.orgId}/payment-requests`)).status).toBe(200);
     const refund = await cashier.post(`/v1/orgs/${owner.orgId}/refunds`, { attemptId: '00000000-0000-4000-8000-000000000000', reason: 'test' }, { 'Idempotency-Key': idemKey() });

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuthService } from '../src/modules/identity/auth.service';
-import { adminSession, registerEnrollmentToken, connectMock, createRequest, login, ownerQuery, PASSWORD, payerActs, registerMerchant, resetDb, startApp, TestCtx, tokenOf } from './helpers';
+import { adminSession, registerEnrollmentToken, connectMock, createRequest, idemKey, login, ownerQuery, PASSWORD, payerActs, registerMerchant, resetDb, startApp, TestCtx, tokenOf } from './helpers';
 
 describe('VITPAY ADMIN', () => {
   let ctx: TestCtx;
@@ -190,6 +190,103 @@ describe('relevés de commissions (facturation hors flux)', () => {
     expect(again.body.issued[0].fees.minor).toBe('700');
     expect((await fin.post(`/v1/admin/billing/statements/${again.body.issued[0].id}/paid`, { reference: 'VIR-2026-0001' })).status).toBe(200);
     expect((await fin.post(`/v1/admin/billing/statements/${again.body.issued[0].id}/void`, { reason: 'Trop tard' })).status).toBe(409);
+  });
+
+  it('aucune commission sur la part remboursée ou perdue en litige ; avoir si déjà facturée', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'waiver@admin.test', 'Org Ristourne');
+    await connectMock(s, orgId);
+    const root = await adminSession(ctx, 'root@admin.test');
+    const fin = await adminSession(ctx, 'fin@admin.test');
+    const ar = await root.post('/v1/admin/approvals', { action: 'org.fee.update', targetId: orgId, payload: { vitpayFeeBps: 200 }, reason: 'Grille pilote' });
+    await fin.post(`/v1/admin/approvals/${ar.body.id}/decision`, { decision: 'approved', note: 'Validé' });
+    const pay = async (amount: string) => {
+      const r = await createRequest(s, orgId, amount);
+      return payerActs(ctx, tokenOf(r.payUrl), 'succeed');
+    };
+    const refund = async (attemptId: string, amount: string) => {
+      const r = await s.post(`/v1/orgs/${orgId}/refunds`, { attemptId, amount, reason: 'Retour client' }, { 'Idempotency-Key': idemKey() });
+      expect(r.body.status).toBe('succeeded');
+      await ctx.psp.drain();
+    };
+    const p1 = await pay('100.00'); // remboursé à 25 % avant facturation → commission sur 75,00
+    const p2 = await pay('200.00'); // litige ouvert → facturation reportée
+    const p3 = await pay('50.00'); // facturé, puis remboursé intégralement → avoir
+    await refund(p1.attemptId, '25.00');
+    const dispute = await ctx.api().post(`/mock-psp/simulate/payments/${p2.providerRef}/dispute`);
+    await ctx.psp.drain();
+
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Casablanca' }).format(new Date());
+    const body = { periodStart: day, periodEnd: day, mode: 'sandbox', orgId };
+    const first = (await fin.post('/v1/admin/billing/statements', body)).body.issued;
+    expect(first).toHaveLength(1);
+    expect(first[0].fees.minor).toBe('250'); // 2 % × 75,00 + 2 % × 50,00 ; P2 reporté
+    expect(first[0].lineCount).toBe(2);
+
+    // Après facturation : remboursement total de P3 et litige perdu sur P2.
+    await refund(p3.attemptId, '50.00');
+    await ctx.api().post(`/mock-psp/simulate/disputes/${dispute.body.id}/lost`);
+    await ctx.psp.drain();
+    const second = (await fin.post('/v1/admin/billing/statements', body)).body.issued;
+    expect(second).toHaveLength(1);
+    expect(second[0].fees.minor).toBe('-100'); // avoir de la commission de P3 ; P2 n'est jamais facturé
+    expect((await fin.post('/v1/admin/billing/statements', body)).body.issued).toHaveLength(0); // idempotent
+    const pdf = await s.get(`/v1/orgs/${orgId}/billing/statements/${second[0].id}/statement.pdf`);
+    expect(pdf.status).toBe(200);
+
+    // Grand livre : commission annulée (25 % de P1, 100 % de P2 et P3), dette de commission = 150.
+    const waived = await ownerQuery(`SELECT 1 FROM journal_entries WHERE entry_type = 'vitpay_fee.waived' AND org_id = $1`, [orgId]);
+    expect(waived).toHaveLength(3);
+    const ledger = await s.get(`/v1/orgs/${orgId}/ledger/balances`);
+    const bal = Object.fromEntries(ledger.body.balances.map((b: { code: string; balanceMinor: string }) => [b.code, b.balanceMinor]));
+    expect(bal.vitpay_fees).toBe('150');
+    expect(bal.vitpay_fees_payable).toBe('150');
+  });
+
+  it('annulation d’un relevé compensé par un avoir, rattrapage des paiements reportés, émissions simultanées', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'waiver2@admin.test', 'Org Rattrapage');
+    await connectMock(s, orgId);
+    const root = await adminSession(ctx, 'root@admin.test');
+    const fin = await adminSession(ctx, 'fin@admin.test');
+    const ar = await root.post('/v1/admin/approvals', { action: 'org.fee.update', targetId: orgId, payload: { vitpayFeeBps: 200 }, reason: 'Grille pilote' });
+    await fin.post(`/v1/admin/approvals/${ar.body.id}/decision`, { decision: 'approved', note: 'Validé' });
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Casablanca' }).format(new Date());
+    const body = { periodStart: day, periodEnd: day, mode: 'sandbox', orgId };
+    const billedNet = async () =>
+      (await ownerQuery<{ n: string }>(`SELECT COALESCE(SUM(l.fee_minor),0)::text AS n FROM commission_statement_lines l WHERE l.org_id = $1 AND l.active`, [orgId]))[0]?.n;
+
+    // [R4-C1] P (100,00, commission 200) facturé sur S1, remboursé à 25 % → avoir −50 sur S2 ; S1 annulé.
+    const r = await createRequest(s, orgId, '100.00');
+    const p = await payerActs(ctx, tokenOf(r.payUrl), 'succeed');
+    const s1 = (await fin.post('/v1/admin/billing/statements', body)).body.issued[0];
+    expect(s1.fees.minor).toBe('200');
+    const rf = await s.post(`/v1/orgs/${orgId}/refunds`, { attemptId: p.attemptId, amount: '25.00', reason: 'Retour' }, { 'Idempotency-Key': idemKey() });
+    expect(rf.body.status).toBe('succeeded');
+    await ctx.psp.drain();
+    const s2 = (await fin.post('/v1/admin/billing/statements', body)).body.issued[0];
+    expect(s2.fees.minor).toBe('-50');
+    await fin.post(`/v1/admin/billing/statements/${s1.id}/void`, { reason: 'Erreur' });
+    const s3 = (await fin.post('/v1/admin/billing/statements', body)).body.issued[0];
+    expect(s3.fees.minor).toBe('200'); // rétablit le dû : −50 + 200 = 150 = 2 % × 75,00
+    expect(await billedNet()).toBe('150');
+
+    // [R4-C2] Paiement reporté (litige ouvert) puis gagné : facturé à l'émission suivante, même période passée.
+    const r2 = await createRequest(s, orgId, '300.00');
+    const p2 = await payerActs(ctx, tokenOf(r2.payUrl), 'succeed');
+    const dispute = await ctx.api().post(`/mock-psp/simulate/payments/${p2.providerRef}/dispute`);
+    await ctx.psp.drain();
+    expect((await fin.post('/v1/admin/billing/statements', body)).body.issued).toHaveLength(0);
+    await ctx.api().post(`/mock-psp/simulate/disputes/${dispute.body.id}/won`);
+    await ctx.psp.drain();
+    const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Casablanca' }).format(new Date(Date.now() + 86_400_000));
+    const late = (await fin.post('/v1/admin/billing/statements', { periodStart: tomorrow, periodEnd: tomorrow, mode: 'sandbox', orgId })).body.issued;
+    expect(late[0].fees.minor).toBe('600');
+
+    // [R4-P1] Émissions simultanées : l'écart n'est compté qu'une fois.
+    const r3 = await createRequest(s, orgId, '50.00');
+    await payerActs(ctx, tokenOf(r3.payUrl), 'succeed');
+    const both = await Promise.all([fin.post('/v1/admin/billing/statements', body), fin.post('/v1/admin/billing/statements', body)]);
+    expect(both.flatMap((b) => b.body.issued)).toHaveLength(1);
+    expect(await billedNet()).toBe('850'); // 150 + 600 + 100
   });
 });
 

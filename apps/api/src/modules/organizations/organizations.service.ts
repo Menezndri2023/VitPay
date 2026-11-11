@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../../config';
 import { encrypt } from '../../common/crypto';
-import { Errors } from '../../common/errors';
-import { Db, isUniqueViolation } from '../../database/db.service';
+import { AppError, Errors } from '../../common/errors';
+import { Db, isUniqueViolation, Tx } from '../../database/db.service';
 import { AuditService } from '../audit/audit.service';
 import { ClientMeta } from '../identity/auth.service';
 import { OrgRole } from '../identity/permissions';
@@ -78,7 +78,13 @@ export class OrganizationsService {
   async addMember(orgId: string, actorId: string, input: { email: string; role: Exclude<OrgRole, 'owner'> }, meta: ClientMeta) {
     return this.db.tx(
       async (tx) => {
-        const u = await tx.maybeOne<{ id: string }>('SELECT id FROM users WHERE lower(email) = lower($1) AND platform_role IS NULL', [input.email]);
+        // [R4-C3] Même règle que les invitations : KYB vérifié en mode réel.
+        await assertTeamGrowthAllowed(tx, orgId, this.config.PAYMENTS_LIVE_ENABLED);
+        // [R4-P2] Jamais un compte non vérifié, désactivé ou libéré (sinon il échapperait à la libération).
+        const u = await tx.maybeOne<{ id: string }>(
+          `SELECT id FROM users WHERE lower(email) = lower($1) AND platform_role IS NULL AND status = 'active' AND email_verified_at IS NOT NULL`,
+          [input.email],
+        );
         if (!u) throw Errors.notFound('User');
         try {
           await tx.query('INSERT INTO memberships (org_id, user_id, role) VALUES ($1,$2,$3)', [orgId, u.id, input.role]);
@@ -227,4 +233,16 @@ export function toCamel<T extends Record<string, unknown>>(row: T): Record<strin
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) out[k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())] = v instanceof Date ? v.toISOString() : v;
   return out;
+}
+
+/**
+ * Décision produit du 11/11/2026 (ADR-012) : en mode réel, l'équipe ne peut s'agrandir qu'avec
+ * une organisation active au KYB vérifié. Appliquée à l'invitation, à son acceptation et à l'ajout direct.
+ */
+export async function assertTeamGrowthAllowed(tx: Tx, orgId: string, liveEnabled: boolean): Promise<void> {
+  const o = await tx.one<{ status: string; kyb_status: string }>('SELECT status, kyb_status FROM organizations WHERE id = $1', [orgId]);
+  if (o.status !== 'active') throw Errors.forbidden('Organization is not active');
+  if (liveEnabled && o.kyb_status !== 'verified') {
+    throw new AppError('kyb_required', 403, 'Your organization must be KYB-verified before adding team members');
+  }
 }

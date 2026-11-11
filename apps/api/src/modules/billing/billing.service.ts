@@ -27,6 +27,23 @@ interface StatementRow {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Aucun remboursement en cours ni litige ouvert : le montant dû est définitif. */
+const SETTLED = `NOT EXISTS (SELECT 1 FROM refunds r WHERE r.payment_attempt_id = a.id AND r.status IN ('requested','pending'))
+  AND NOT EXISTS (SELECT 1 FROM disputes d WHERE d.payment_attempt_id = a.id AND d.status IN ('opened','evidence_submitted'))`;
+/** Total net déjà facturé pour le paiement (débits − avoirs des relevés non annulés). */
+const BILLED = `(SELECT COALESCE(SUM(l.fee_minor),0) FROM commission_statement_lines l WHERE l.attempt_id = a.id AND l.active)`;
+/** Commission nette due (après annulation sur la part remboursée ou perdue en litige). */
+const DUE = `(COALESCE(a.vitpay_fee_minor,0) - a.vitpay_fee_waived_minor)`;
+/**
+ * [R4-C1/C2] Paiement à régulariser : confirmé au plus tard en fin de période, montant définitif,
+ * et écart entre dû et facturé non nul. L'écart est facturé (> 0) ou crédité (< 0) : rattrapage
+ * automatique des paiements reportés et cohérence garantie après l'annulation d'un relevé.
+ */
+const TO_BILL = `a.status = 'succeeded' AND a.vitpay_fee_minor IS NOT NULL
+  AND (a.succeeded_at AT TIME ZONE 'Africa/Casablanca')::date <= $PERIOD_END::date
+  AND ${SETTLED}
+  AND ${DUE} <> ${BILLED}`;
+
 /**
  * Relevés de commissions VITPAY (modèle A) : la commission due sur les paiements confirmés
  * est facturée séparément, jamais prélevée sur les flux. Pro forma jusqu'à validation fiscale.
@@ -60,9 +77,12 @@ export class BillingService {
   }
 
   /**
-   * Émet les relevés de la période pour une organisation (ou toutes) : paiements confirmés
-   * (jour marocain) portant une commission > 0 et pas encore facturés. Idempotent par construction
-   * (un paiement n'apparaît que dans un relevé actif).
+   * Émet les relevés arrêtés à la fin de période pour une organisation (ou toutes).
+   * Pour chaque paiement confirmé au plus tard ce jour-là (jour marocain) et dont le montant est
+   * définitif (aucun remboursement en cours, aucun litige ouvert), l'écart entre la commission
+   * NETTE due et le total déjà facturé (relevés non annulés) devient une ligne : débit si positif,
+   * avoir si négatif. Les paiements reportés sont rattrapés au relevé suivant ; l'annulation d'un
+   * relevé est corrigée automatiquement ; réémettre ne produit rien (écart nul).
    */
   async issue(actor: AuditActor & { userId: string }, input: { periodStart: string; periodEnd: string; mode: 'sandbox' | 'live'; orgId?: string }) {
     if (!DATE_RE.test(input.periodStart) || !DATE_RE.test(input.periodEnd) || input.periodEnd < input.periodStart) {
@@ -71,15 +91,9 @@ export class BillingService {
     // Une transaction PAR organisation et devise : pas de verrou global, un conflit n'annule pas les autres relevés.
     const groups = await this.db.system((tx) =>
       tx.query<{ org_id: string; currency: Currency }>(
-        `SELECT a.org_id, a.currency
-           FROM payment_attempts a
-           JOIN payment_requests pr ON pr.id = a.payment_request_id
-          WHERE a.status = 'succeeded' AND a.vitpay_fee_minor > 0 AND pr.mode = $3
-            AND (a.succeeded_at AT TIME ZONE 'Africa/Casablanca')::date BETWEEN $1::date AND $2::date
-            AND ($4::uuid IS NULL OR a.org_id = $4)
-            AND NOT EXISTS (SELECT 1 FROM commission_statement_lines l WHERE l.attempt_id = a.id AND l.active)
-          GROUP BY a.org_id, a.currency`,
-        [input.periodStart, input.periodEnd, input.mode, input.orgId ?? null],
+        `SELECT DISTINCT a.org_id, a.currency FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id
+          WHERE ${TO_BILL.replace('$PERIOD_END', '$1')} AND pr.mode = $2 AND ($3::uuid IS NULL OR a.org_id = $3)`,
+        [input.periodEnd, input.mode, input.orgId ?? null],
       ),
     );
     const issued: ReturnType<BillingService['view']>[] = [];
@@ -102,28 +116,45 @@ export class BillingService {
     input: { periodStart: string; periodEnd: string; mode: 'sandbox' | 'live' },
     g: { org_id: string; currency: Currency },
   ): Promise<ReturnType<BillingService['view']> | null> {
-        const lines = await tx.query<{ id: string; vitpay_fee_minor: string }>(
-          `SELECT a.id, a.vitpay_fee_minor FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id
-            WHERE a.org_id = $1 AND a.currency = $2 AND a.status = 'succeeded' AND a.vitpay_fee_minor > 0 AND pr.mode = $5
-              AND (a.succeeded_at AT TIME ZONE 'Africa/Casablanca')::date BETWEEN $3::date AND $4::date
-              AND NOT EXISTS (SELECT 1 FROM commission_statement_lines l WHERE l.attempt_id = a.id AND l.active)
-            ORDER BY a.succeeded_at FOR UPDATE OF a`,
-          [g.org_id, g.currency, input.periodStart, input.periodEnd, input.mode],
-        );
-        if (!lines.length) return null;
-        const total = lines.reduce((s, l) => s.add(Money.of(l.vitpay_fee_minor, g.currency)), Money.zero(g.currency));
-        const n = await tx.one<{ n: string }>(`SELECT nextval('commission_statement_seq')::text AS n`);
-        const prefix = input.mode === 'sandbox' ? 'TEST-VPC' : 'VPC';
-        const st = await tx.one<StatementRow>(
-          `INSERT INTO commission_statements (org_id, number, mode, period_start, period_end, currency, fees_minor, line_count, status, issued_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'issued',$9) RETURNING *`,
-          [g.org_id, `${prefix}-${input.periodEnd.slice(0, 4)}-${n.n.padStart(6, '0')}`, input.mode, input.periodStart, input.periodEnd, g.currency, total.minor.toString(), lines.length, actor.userId],
-        );
-        for (const l of lines) {
-          await tx.query(`INSERT INTO commission_statement_lines (statement_id, org_id, attempt_id, fee_minor) VALUES ($1,$2,$3,$4)`, [st.id, g.org_id, l.id, l.vitpay_fee_minor]);
-        }
-        await this.audit.record(tx, { actor, orgId: g.org_id, action: 'billing.statement_issued', targetType: 'commission_statement', targetId: st.id, after: { number: st.number, fees: total.toJSON(), lines: lines.length } });
-        return this.view(st);
+    // [R4-P1] Un seul calcul à la fois par organisation, devise et mode : deux émissions simultanées
+    // ne peuvent pas compter deux fois le même écart (les requêtes suivantes voient l'état validé).
+    await tx.query(`SELECT pg_advisory_xact_lock(hashtext('billing:' || $1 || ':' || $2 || ':' || $3))`, [g.org_id, g.currency, input.mode]);
+    const lines = await tx.query<{ id: string; diff_minor: string }>(
+      `SELECT a.id, (${DUE} - ${BILLED})::text AS diff_minor
+         FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id
+        WHERE a.org_id = $1 AND a.currency = $2 AND pr.mode = $4 AND ${TO_BILL.replace('$PERIOD_END', '$3')}
+        ORDER BY a.succeeded_at FOR UPDATE OF a`,
+      [g.org_id, g.currency, input.periodEnd, input.mode],
+    );
+    if (!lines.length) return null;
+    const charges = lines.filter((l) => !l.diff_minor.startsWith('-'));
+    const credits = lines.filter((l) => l.diff_minor.startsWith('-'));
+    const total = lines.reduce((sum, l) => sum.add(Money.of(l.diff_minor, g.currency)), Money.zero(g.currency));
+    const n = await tx.one<{ n: string }>(`SELECT nextval('commission_statement_seq')::text AS n`);
+    const prefix = input.mode === 'sandbox' ? 'TEST-VPC' : 'VPC';
+    const st = await tx.one<StatementRow>(
+      `INSERT INTO commission_statements (org_id, number, mode, period_start, period_end, currency, fees_minor, line_count, status, issued_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'issued',$9) RETURNING *`,
+      [g.org_id, `${prefix}-${input.periodEnd.slice(0, 4)}-${n.n.padStart(6, '0')}`, input.mode, input.periodStart, input.periodEnd, g.currency, total.minor.toString(), charges.length + credits.length, actor.userId],
+    );
+    for (const l of lines) {
+      await tx.query(`INSERT INTO commission_statement_lines (statement_id, org_id, attempt_id, fee_minor, kind) VALUES ($1,$2,$3,$4,$5)`, [
+        st.id,
+        g.org_id,
+        l.id,
+        l.diff_minor,
+        l.diff_minor.startsWith('-') ? 'credit' : 'charge',
+      ]);
+    }
+    await this.audit.record(tx, {
+      actor,
+      orgId: g.org_id,
+      action: 'billing.statement_issued',
+      targetType: 'commission_statement',
+      targetId: st.id,
+      after: { number: st.number, fees: total.toJSON(), charges: charges.length, credits: credits.length },
+    });
+    return this.view(st);
   }
 
   async listAll(status?: string) {
@@ -168,8 +199,8 @@ export class BillingService {
     const data = await this.db.forOrg(orgId, async (tx) => {
       const s = await tx.maybeOne<StatementRow>('SELECT s.*, o.display_name FROM commission_statements s JOIN organizations o ON o.id = s.org_id WHERE s.id = $1', [id]);
       if (!s) throw Errors.notFound('Statement');
-      const lines = await tx.query<{ reference: string; succeeded_at: Date; amount_minor: string; fee_minor: string }>(
-        `SELECT pr.reference, a.succeeded_at, a.amount_minor, l.fee_minor FROM commission_statement_lines l
+      const lines = await tx.query<{ reference: string; succeeded_at: Date; amount_minor: string; fee_minor: string; kind: string }>(
+        `SELECT pr.reference, a.succeeded_at, a.amount_minor, l.fee_minor, l.kind FROM commission_statement_lines l
            JOIN payment_attempts a ON a.id = l.attempt_id JOIN payment_requests pr ON pr.id = a.payment_request_id
           WHERE l.statement_id = $1 ORDER BY a.succeeded_at`,
         [id],
@@ -179,7 +210,7 @@ export class BillingService {
     return this.render(data.s, data.lines);
   }
 
-  private render(s: StatementRow, lines: { reference: string; succeeded_at: Date; amount_minor: string; fee_minor: string }[]): Promise<Buffer> {
+  private render(s: StatementRow, lines: { reference: string; succeeded_at: Date; amount_minor: string; fee_minor: string; kind: string }[]): Promise<Buffer> {
     const v = this.view(s);
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ size: 'A4', margin: 48, info: { Title: `Relevé ${s.number}`, Author: 'VITPAY' } });
@@ -203,16 +234,19 @@ export class BillingService {
       doc.fontSize(9).fillColor('#667085').text('Date (UTC)            Référence           Montant encaissé         Commission');
       doc.fillColor('#101828');
       for (const l of lines) {
-        doc.text(`${l.succeeded_at.toISOString().slice(0, 16).replace('T', ' ')}     ${l.reference.padEnd(16)}    ${fmt(l.amount_minor).padStart(18)}    ${fmt(l.fee_minor).padStart(14)}`);
+        const label = l.kind === 'credit' ? `${l.reference} (avoir)` : l.reference;
+        doc.text(`${l.succeeded_at.toISOString().slice(0, 16).replace('T', ' ')}     ${label.padEnd(16)}    ${fmt(l.amount_minor).padStart(18)}    ${fmt(l.fee_minor).padStart(14)}`);
       }
       doc.moveDown();
-      doc.fontSize(12).text(`Total commissions : ${fmt(s.fees_minor)}`, { align: 'right' });
+      const negative = s.fees_minor.startsWith('-');
+      doc.fontSize(12).text(negative ? `Avoir en votre faveur : ${fmt(s.fees_minor.slice(1))}` : `Total commissions : ${fmt(s.fees_minor)}`, { align: 'right' });
       doc.moveDown(2);
       doc
         .fontSize(7.5)
         .fillColor('#667085')
         .text(
           'Document pro forma : le format de facture et le régime de TVA applicables sont en cours de validation. ' +
+            'Aucune commission n’est due sur la part remboursée ou perdue en litige ; une commission déjà facturée fait l’objet d’un avoir. ' +
             'La commission VITPAY est facturée séparément : elle n’est jamais prélevée sur les fonds encaissés, qui sont traités et reversés par votre prestataire de paiement.',
         );
       doc.end();

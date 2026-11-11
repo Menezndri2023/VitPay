@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Currency, isCurrency, Money } from '@vitpay/money';
 import { Errors } from '../../common/errors';
-import { Db } from '../../database/db.service';
+import { Db, Tx } from '../../database/db.service';
 import { AuditActor, AuditService } from '../audit/audit.service';
 import { LedgerService } from '../ledger/ledger.service';
-import { disputeClosedEntry, disputeOpenedEntry, refundSucceededEntry } from '../ledger/posting-rules';
+import { disputeClosedEntry, disputeOpenedEntry, refundSucceededEntry, vitpayFeeWaivedEntry, waivedFeeTarget } from '../ledger/posting-rules';
 import { IncidentsService } from '../platform/incidents.service';
 import { OutboxService } from '../platform/outbox.service';
 import { ProviderAccountRow, ProviderRegistry } from '../providers/provider-registry';
@@ -160,6 +160,7 @@ export class RefundsService {
       await this.audit.record(tx, { actor, orgId, action: 'refund.status_changed', targetType: 'refund', targetId: r.id, before: { status: r.status }, after: { status: to } });
       if (to === 'succeeded') {
         await this.ledger.post(tx, refundSucceededEntry({ orgId, refundId: r.id, amount: Money.of(r.amount_minor, r.currency) }));
+        await this.waiveFee(tx, orgId, r.payment_attempt_id, { type: 'refund', id: r.id }, actor);
         await this.outbox.publish(tx, { eventType: 'refund.succeeded', aggregateType: 'refund', aggregateId: r.id, orgId, payload: { amount: money(r.amount_minor, r.currency) } });
       } else if (to === 'failed') {
         await this.incidents.open(tx, { orgId, type: 'refund_failed', severity: 'medium', summary: `Refund ${r.id} failed at provider`, dedupeKey: `refund_failed:${r.id}` });
@@ -207,8 +208,33 @@ export class RefundsService {
       await this.audit.record(tx, { actor, orgId, action: 'dispute.status_changed', targetType: 'dispute', targetId: row.id, before: { status: row.status }, after: { status: d.status } });
       if (d.status === 'won' || d.status === 'lost') {
         await this.ledger.post(tx, disputeClosedEntry({ orgId, disputeId: row.id, amount: Money.of(row.amount_minor, a.currency), outcome: d.status }));
+        if (d.status === 'lost') await this.waiveFee(tx, orgId, a.id, { type: 'dispute', id: row.id }, actor);
         await this.outbox.publish(tx, { eventType: `dispute.${d.status}`, aggregateType: 'dispute', aggregateId: row.id, orgId, payload: {} });
       }
     });
+  }
+
+  /**
+   * Décision produit du 11/11/2026 : pas de commission VITPAY sur la part remboursée ou perdue en
+   * litige. Recalcule la part annulée (cumulée) et passe la contre-écriture de la différence.
+   * Une commission déjà facturée donnera lieu à un avoir au relevé suivant (BillingService).
+   */
+  private async waiveFee(tx: Tx, orgId: string, attemptId: string, cause: { type: 'refund' | 'dispute'; id: string }, actor: AuditActor): Promise<void> {
+    const a = await tx.one<{ amount_minor: string; currency: Currency; vitpay_fee_minor: string | null; vitpay_fee_waived_minor: string }>(
+      'SELECT amount_minor, currency, vitpay_fee_minor, vitpay_fee_waived_minor FROM payment_attempts WHERE id = $1 FOR UPDATE',
+      [attemptId],
+    );
+    if (!a.vitpay_fee_minor || a.vitpay_fee_minor === '0') return;
+    const reduced = await tx.one<{ total: string }>(
+      `SELECT ((SELECT COALESCE(SUM(amount_minor),0) FROM refunds WHERE payment_attempt_id = $1 AND status = 'succeeded')
+             + (SELECT COALESCE(SUM(amount_minor),0) FROM disputes WHERE payment_attempt_id = $1 AND status = 'lost'))::text AS total`,
+      [attemptId],
+    );
+    const target = waivedFeeTarget(Money.of(a.vitpay_fee_minor, a.currency), Money.of(a.amount_minor, a.currency), Money.of(reduced.total, a.currency));
+    const delta = target.subtract(Money.of(a.vitpay_fee_waived_minor, a.currency));
+    if (delta.compare(Money.zero(a.currency)) <= 0) return;
+    await tx.query('UPDATE payment_attempts SET vitpay_fee_waived_minor = $2 WHERE id = $1', [attemptId, target.minor.toString()]);
+    await this.ledger.post(tx, vitpayFeeWaivedEntry({ orgId, attemptId, cause, amount: delta }));
+    await this.audit.record(tx, { actor, orgId, action: 'billing.fee_waived', targetType: 'payment_attempt', targetId: attemptId, after: { waived: delta.toJSON(), cause } });
   }
 }
