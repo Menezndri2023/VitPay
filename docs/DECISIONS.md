@@ -48,6 +48,6 @@ Chaque décision importante est consignée ici. **Aucune ne doit être modifiée
 
 ## ADR-012 — Décisions produit du 11/11/2026
 - **Statut** : ✅ Validée (porteur du projet) et appliquée.
-- **Commission** : aucune commission VITPAY sur la part remboursée ou perdue en litige ; avoir si déjà facturée. À revoir si des frais de service sont possibles juridiquement et commercialement (voir FINANCIAL_CORE).
+- **Commission** : uniquement sur les transactions réussies ; aucune sur un remboursement ni sur la part remboursée ou perdue en litige (au prorata — une annulation totale sur un remboursement partiel ouvrirait un contournement par remboursement symbolique) ; avoir reporté sur le relevé suivant si déjà facturée, jamais de relevé négatif. À revoir si des frais de service sont possibles juridiquement et commercialement (voir FINANCIAL_CORE).
 - **KYB avant l'équipe** : en mode réel (`PAYMENTS_LIVE_ENABLED=true`), une organisation ne peut inviter de collaborateurs qu'avec un KYB vérifié (`kyb_required`). En sandbox, les invitations restent libres.
 - **Comptes non vérifiés** : libérés après 7 jours (adresse et nom effacés, empreinte de l'adresse conservée dans l'audit, organisation fermée). Jamais si le compte a la moindre activité de paiement ou partage une organisation.

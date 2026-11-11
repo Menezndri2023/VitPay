@@ -302,13 +302,21 @@ function KybDocuments() {
 function StatementList() {
   const { orgApi, orgId } = useOrg();
   const [list, setList] = useState<{ id: string; number: string; periodStart: string; periodEnd: string; fees: MoneyView; status: string }[] | null>(null);
+  const [credits, setCredits] = useState<{ mode: string; credit: MoneyView }[]>([]);
   useEffect(() => {
     orgApi<typeof list>('/billing/statements').then(setList).catch(() => setList([]));
+    orgApi<{ mode: string; credit: MoneyView }[]>('/billing/statements/pending-credits').then(setCredits).catch(() => setCredits([]));
   }, [orgApi]);
   if (!list) return <p className="vp-muted">Chargement…</p>;
-  if (!list.length) return <p className="vp-muted">Aucun relevé pour le moment.</p>;
+  const creditNote = credits.map((c) => (
+    <p key={c.mode + c.credit.currency} className="vp-small vp-muted" style={{ margin: 0 }}>
+      Avoir à imputer sur votre prochain relevé{c.mode === 'sandbox' ? ' (test)' : ''} : <strong>{formatMoney(c.credit)}</strong> — commission annulée suite à un remboursement ou un litige perdu.
+    </p>
+  ));
+  if (!list.length) return <>{creditNote}<p className="vp-muted">Aucun relevé pour le moment.</p></>;
   return (
     <div className="vp-stack" style={{ gap: 6 }}>
+      {creditNote}
       {list.map((s) => (
         <div key={s.id} className="vp-row vp-between">
           <span>

@@ -97,13 +97,13 @@ La commission (`vitpay_fee_bps` par organisation, modifiable à quatre yeux) est
 - Un relevé est arrêté à une date de fin (jours calendaires de Casablanca) et couvre une organisation, une devise et un mode (sandbox ou live).
 - Pour chaque paiement confirmé au plus tard à cette date et au montant définitif, le relevé porte **l'écart entre la commission nette due et le total déjà facturé** (relevés non annulés) : débit si positif, avoir si négatif. Réémettre ne refacture rien (écart nul) ; les paiements reportés sont rattrapés ; l'annulation d'un relevé est corrigée à l'émission suivante.
 - Émissions simultanées sérialisées par un verrou consultatif (organisation, devise, mode).
-- Statuts : `issued` → `paid` (référence du règlement reçu ; pour un relevé négatif, référence de l'imputation ou du remboursement de l'avoir) ou `void`.
+- Statuts : `issued` → `paid` (référence du règlement reçu) ou `void`.
 - Pas de rétroactivité : les remboursements et litiges antérieurs à la migration 015 (environnements de test uniquement) ne sont pas recalculés.
 - Document **pro forma** tant que le format de facture et la TVA ne sont pas validés (COMPLIANCE E2).
-- **Décision du 11/11/2026 (ADR-012)** : aucune commission sur la part remboursée ou perdue en litige.
+- **Décision du 11/11/2026 (ADR-012)** : la commission ne porte que sur les transactions réussies et conservées — jamais sur un remboursement, un échec, une annulation ni sur la part remboursée ou perdue en litige.
   - Part annulée = commission × (remboursements confirmés + litiges perdus) / montant payé ; la commission restante est arrondie à l'inférieur (au profit du commerçant). Cumul stocké dans `payment_attempts.vitpay_fee_waived_minor`, contre-écriture `vitpay_fee.waived` au ledger (idempotente par remboursement ou litige).
   - Facturation reportée tant qu'un remboursement est en cours ou qu'un litige est ouvert.
-  - Commission déjà facturée puis annulée : **ligne d'avoir** (montant négatif) au relevé suivant ; un relevé peut être un avoir global.
+  - Commission déjà facturée puis annulée : **avoir** imputé sur le prochain relevé positif. Aucun relevé négatif n'est émis (modèle A : VITPAY ne verse jamais de fonds) ; l'avoir en attente est visible par le commerçant (`GET …/billing/statements/pending-credits`). En fin de relation, un avoir non imputé se règle hors plateforme (procédure à définir avec la finance).
   - À revoir si des frais de service fixes sont introduits (COMPLIANCE A3/E2).
 
 ## Tests

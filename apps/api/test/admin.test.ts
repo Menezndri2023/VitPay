@@ -226,20 +226,29 @@ describe('relevés de commissions (facturation hors flux)', () => {
     await refund(p3.attemptId, '50.00');
     await ctx.api().post(`/mock-psp/simulate/disputes/${dispute.body.id}/lost`);
     await ctx.psp.drain();
-    const second = (await fin.post('/v1/admin/billing/statements', body)).body.issued;
-    expect(second).toHaveLength(1);
-    expect(second[0].fees.minor).toBe('-100'); // avoir de la commission de P3 ; P2 n'est jamais facturé
-    expect((await fin.post('/v1/admin/billing/statements', body)).body.issued).toHaveLength(0); // idempotent
-    const pdf = await s.get(`/v1/orgs/${orgId}/billing/statements/${second[0].id}/statement.pdf`);
+    // Avoir de 100 (commission de P3) : pas de relevé négatif, report sur le prochain relevé.
+    expect((await fin.post('/v1/admin/billing/statements', body)).body.issued).toHaveLength(0);
+    const pending = await s.get(`/v1/orgs/${orgId}/billing/statements/pending-credits`);
+    expect(pending.body).toEqual([{ mode: 'sandbox', credit: expect.objectContaining({ minor: '100' }) }]);
+    const p4 = await pay('400.00'); // commission 800 − avoir 100 = 700
+    expect(p4.attemptId).toBeTruthy();
+    const third = (await fin.post('/v1/admin/billing/statements', body)).body.issued;
+    expect(third).toHaveLength(1);
+    expect(third[0].fees.minor).toBe('700');
+    expect((await s.get(`/v1/orgs/${orgId}/billing/statements/pending-credits`)).body).toEqual([]);
+    const pdf = await s.get(`/v1/orgs/${orgId}/billing/statements/${third[0].id}/statement.pdf`);
     expect(pdf.status).toBe(200);
 
-    // Grand livre : commission annulée (25 % de P1, 100 % de P2 et P3), dette de commission = 150.
+    // Grand livre : commission annulée (25 % de P1, 100 % de P2 et P3), dette de commission = 150 + 800 (P4).
     const waived = await ownerQuery(`SELECT 1 FROM journal_entries WHERE entry_type = 'vitpay_fee.waived' AND org_id = $1`, [orgId]);
     expect(waived).toHaveLength(3);
     const ledger = await s.get(`/v1/orgs/${orgId}/ledger/balances`);
     const bal = Object.fromEntries(ledger.body.balances.map((b: { code: string; balanceMinor: string }) => [b.code, b.balanceMinor]));
-    expect(bal.vitpay_fees).toBe('150');
-    expect(bal.vitpay_fees_payable).toBe('150');
+    expect(bal.vitpay_fees).toBe('950');
+    expect(bal.vitpay_fees_payable).toBe('950');
+    // Facturé au total : 250 + 700 = 950 = commission due
+    const net = await ownerQuery<{ n: string }>(`SELECT SUM(fee_minor)::text AS n FROM commission_statement_lines WHERE org_id = $1 AND active`, [orgId]);
+    expect(net[0]?.n).toBe('950');
   });
 
   it('annulation d’un relevé compensé par un avoir, rattrapage des paiements reportés, émissions simultanées', async () => {
@@ -262,12 +271,21 @@ describe('relevés de commissions (facturation hors flux)', () => {
     const rf = await s.post(`/v1/orgs/${orgId}/refunds`, { attemptId: p.attemptId, amount: '25.00', reason: 'Retour' }, { 'Idempotency-Key': idemKey() });
     expect(rf.body.status).toBe('succeeded');
     await ctx.psp.drain();
+    // Avoir −50 seul : reporté (aucun relevé négatif).
+    expect((await fin.post('/v1/admin/billing/statements', body)).body.issued).toHaveLength(0);
+    // Nouveau paiement Q (commission 100) : S2 = 100 − 50, l'avoir est imputé dans S2.
+    const rq = await createRequest(s, orgId, '50.00');
+    await payerActs(ctx, tokenOf(rq.payUrl), 'succeed');
     const s2 = (await fin.post('/v1/admin/billing/statements', body)).body.issued[0];
-    expect(s2.fees.minor).toBe('-50');
+    expect(s2.fees.minor).toBe('50');
+    // Annulation de S1 (le débit de P) alors que son avoir est actif sur S2 : pas de double avoir.
     await fin.post(`/v1/admin/billing/statements/${s1.id}/void`, { reason: 'Erreur' });
     const s3 = (await fin.post('/v1/admin/billing/statements', body)).body.issued[0];
-    expect(s3.fees.minor).toBe('200'); // rétablit le dû : −50 + 200 = 150 = 2 % × 75,00
-    expect(await billedNet()).toBe('150');
+    expect(s3.fees.minor).toBe('200'); // −50 (S2) + 200 = 150 = 2 % × 75,00
+    expect(await billedNet()).toBe('250'); // P 150 + Q 100
+    // Après annulation d'un relevé déjà compensé, aucun double avoir
+    const s4 = (await fin.post('/v1/admin/billing/statements', body)).body.issued;
+    expect(s4).toHaveLength(0);
 
     // [R4-C2] Paiement reporté (litige ouvert) puis gagné : facturé à l'émission suivante, même période passée.
     const r2 = await createRequest(s, orgId, '300.00');
@@ -286,7 +304,7 @@ describe('relevés de commissions (facturation hors flux)', () => {
     await payerActs(ctx, tokenOf(r3.payUrl), 'succeed');
     const both = await Promise.all([fin.post('/v1/admin/billing/statements', body), fin.post('/v1/admin/billing/statements', body)]);
     expect(both.flatMap((b) => b.body.issued)).toHaveLength(1);
-    expect(await billedNet()).toBe('850'); // 150 + 600 + 100
+    expect(await billedNet()).toBe('950'); // P 150 + Q 100 + 600 + 100
   });
 });
 

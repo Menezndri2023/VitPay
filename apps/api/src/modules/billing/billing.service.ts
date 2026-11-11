@@ -130,6 +130,9 @@ export class BillingService {
     const charges = lines.filter((l) => !l.diff_minor.startsWith('-'));
     const credits = lines.filter((l) => l.diff_minor.startsWith('-'));
     const total = lines.reduce((sum, l) => sum.add(Money.of(l.diff_minor, g.currency)), Money.zero(g.currency));
+    // Modèle A : VITPAY ne verse jamais de fonds. Un solde créditeur (avoir) n'est pas émis en relevé
+    // négatif : les lignes restent en attente et s'imputent sur le prochain relevé positif.
+    if (total.compare(Money.zero(g.currency)) <= 0) return null;
     const n = await tx.one<{ n: string }>(`SELECT nextval('commission_statement_seq')::text AS n`);
     const prefix = input.mode === 'sandbox' ? 'TEST-VPC' : 'VPC';
     const st = await tx.one<StatementRow>(
@@ -173,11 +176,25 @@ export class BillingService {
     return rows.map((r) => this.view(r));
   }
 
+  /** Avoir en attente d'imputation (commission déjà facturée puis annulée), par devise et mode. */
+  async pendingCredits(orgId: string) {
+    const rows = await this.db.forOrg(orgId, (tx) =>
+      tx.query<{ currency: Currency; mode: string; credit_minor: string }>(
+        `SELECT a.currency, pr.mode, SUM(${DUE} - ${BILLED})::text AS credit_minor
+           FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id
+          WHERE a.status = 'succeeded' AND a.vitpay_fee_minor IS NOT NULL AND ${SETTLED} AND ${DUE} < ${BILLED}
+          GROUP BY a.currency, pr.mode`,
+      ),
+    );
+    return rows.map((r) => ({ mode: r.mode, credit: money(r.credit_minor.replace('-', ''), r.currency) }));
+  }
+
   async markPaid(actor: AuditActor, id: string, reference: string) {
     await this.db.system(async (tx) => {
       const s = await tx.maybeOne<StatementRow>('SELECT * FROM commission_statements WHERE id = $1 FOR UPDATE', [id]);
       if (!s) throw Errors.notFound('Statement');
       if (s.status !== 'issued') throw Errors.invalidState(`Statement is ${s.status}`);
+      if (String(s.fees_minor).startsWith('-')) throw Errors.invalidState('A credit statement cannot be marked as paid');
       await tx.query(`UPDATE commission_statements SET status = 'paid', paid_at = now(), payment_reference = $2 WHERE id = $1`, [id, reference]);
       await this.audit.record(tx, { actor, orgId: s.org_id, action: 'billing.statement_paid', targetType: 'commission_statement', targetId: id, metadata: { reference } });
     });

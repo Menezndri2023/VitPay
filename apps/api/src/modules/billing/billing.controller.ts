@@ -60,6 +60,13 @@ export class OrgBillingController {
     return this.billing.listForOrg(org.orgId);
   }
 
+  /** Avoirs en attente : commission déjà facturée puis annulée, imputée sur le prochain relevé. */
+  @RequireOrgPermission('billing:read')
+  @Get('pending-credits')
+  credits(@Org() org: OrgContext) {
+    return this.billing.pendingCredits(org.orgId);
+  }
+
   @RequireOrgPermission('billing:read')
   @Get(':id/statement.pdf')
   async pdf(@Org() org: OrgContext, @Param('id', new ZodPipe(UUID)) id: string, @Res() res: Response) {
