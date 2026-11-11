@@ -1,39 +1,74 @@
+import { Logger, OnModuleDestroy } from '@nestjs/common';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import type { ThrottlerStorageRecord } from '@nestjs/throttler/dist/throttler-storage-record.interface';
-import { Db } from '../../database/db.service';
+import { Pool } from 'pg';
+import { hmacSha256Hex } from '../../common/crypto';
+import { AppConfig } from '../../config';
+import { metrics } from '../../common/observability';
+
+const CACHE_MAX = 10_000;
 
 /**
- * Stockage partagé des compteurs de limitation de débit : toutes les instances de l'API voient les
- * mêmes compteurs (une instance de plus ne multiplie plus la limite). Une seule requête atomique
- * (INSERT … ON CONFLICT) par appel, en auto-commit sur le pool applicatif.
+ * Compteurs de limitation de débit partagés par toutes les instances (PostgreSQL, ADR-007).
+ * - Pool dédié et borné ([R6-2]) : la limitation ne peut pas épuiser les connexions métier ;
+ *   délais de connexion et d'exécution courts.
+ * - Clés = HMAC à clé serveur ([R6-6]) : pas d'IP retrouvable par dictionnaire dans la base.
+ * - Cache local des clés bloquées : les 429 répétés ne touchent pas la base.
+ * - En cas d'indisponibilité de la base : la requête passe (journal + métrique). Les protections
+ *   d'authentification (verrouillage de compte atomique, anti-rejeu TOTP) restent en base.
+ * Fenêtre fixe (et non glissante) : jusqu'à 2× la limite possible à la jonction de deux fenêtres.
  */
-export class PgThrottlerStorage implements ThrottlerStorage {
-  constructor(private readonly db: Db) {}
+export class PgThrottlerStorage implements ThrottlerStorage, OnModuleDestroy {
+  private readonly logger = new Logger('RateLimit');
+  private readonly pool: Pool;
+  private readonly blocked = new Map<string, { until: number; hits: number }>();
+  private readonly secret: string;
+
+  constructor(config: AppConfig) {
+    this.pool = new Pool({
+      connectionString: config.DATABASE_URL,
+      max: 4,
+      connectionTimeoutMillis: 1_000,
+      statement_timeout: 250,
+      application_name: 'vitpay-api-ratelimit',
+    });
+    this.secret = config.encryptionKey.pseudonymKey();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.pool.end().catch(() => undefined);
+  }
 
   async increment(key: string, ttl: number, limit: number, blockDuration: number, throttlerName: string): Promise<ThrottlerStorageRecord> {
-    const fresh = `(rate_limits.expires_at <= now() AND (rate_limits.blocked_until IS NULL OR rate_limits.blocked_until <= now()))`;
-    const hits = `CASE WHEN ${fresh} THEN 1 ELSE rate_limits.hits + 1 END`;
-    const r = await this.db.autocommit<{ hits: number; expires_ms: string; blocked_ms: string | null }>(
-      `INSERT INTO rate_limits AS rate_limits (key, hits, expires_at, blocked_until)
-       VALUES ($1, 1, now() + make_interval(secs => $2 / 1000.0), CASE WHEN 1 > $3 THEN now() + make_interval(secs => $4 / 1000.0) END)
-       ON CONFLICT (key) DO UPDATE SET
-         hits = ${hits},
-         expires_at = CASE WHEN ${fresh} THEN now() + make_interval(secs => $2 / 1000.0) ELSE rate_limits.expires_at END,
-         blocked_until = CASE
-           WHEN rate_limits.blocked_until > now() THEN rate_limits.blocked_until
-           WHEN ${hits} > $3 THEN now() + make_interval(secs => $4 / 1000.0)
-           ELSE NULL END
-       RETURNING hits,
-         GREATEST(0, EXTRACT(EPOCH FROM (expires_at - now())) * 1000)::bigint::text AS expires_ms,
-         CASE WHEN blocked_until > now() THEN (EXTRACT(EPOCH FROM (blocked_until - now())) * 1000)::bigint::text END AS blocked_ms`,
-      [`${throttlerName}:${key}`, ttl, limit, blockDuration],
-    );
-    const row = r[0] as { hits: number; expires_ms: string; blocked_ms: string | null };
-    return {
-      totalHits: row.hits,
-      timeToExpire: Math.ceil(Number(row.expires_ms) / 1000),
-      isBlocked: row.blocked_ms !== null,
-      timeToBlockExpire: row.blocked_ms === null ? 0 : Math.ceil(Number(row.blocked_ms) / 1000),
-    };
+    const k = hmacSha256Hex(this.secret, `${throttlerName}:${key}`).slice(0, 48);
+    const now = Date.now();
+    const cached = this.blocked.get(k);
+    if (cached && cached.until > now) {
+      const s = Math.ceil((cached.until - now) / 1000);
+      return { totalHits: cached.hits + 1, timeToExpire: s, isBlocked: true, timeToBlockExpire: s };
+    }
+    if (cached) this.blocked.delete(k);
+    try {
+      const { rows } = await this.pool.query<{ hits: number; expires_ms: string; blocked_ms: string | null }>('SELECT * FROM rate_limit_hit($1, $2, $3, $4)', [
+        k,
+        Math.max(1, Math.round(ttl)),
+        Math.max(1, limit),
+        Math.max(0, Math.round(blockDuration)),
+      ]);
+      const row = rows[0] as { hits: number; expires_ms: string; blocked_ms: string | null };
+      const timeToExpire = Math.ceil(Number(row.expires_ms) / 1000);
+      // Sans durée de blocage : refus dès que la limite est dépassée dans la fenêtre (comportement par défaut).
+      const isBlocked = row.blocked_ms !== null || (blockDuration <= 0 && row.hits > limit);
+      const timeToBlockExpire = row.blocked_ms !== null ? Math.ceil(Number(row.blocked_ms) / 1000) : isBlocked ? timeToExpire : 0;
+      if (isBlocked) {
+        if (this.blocked.size >= CACHE_MAX) this.blocked.clear();
+        this.blocked.set(k, { until: now + timeToBlockExpire * 1000, hits: row.hits });
+      }
+      return { totalHits: row.hits, timeToExpire, isBlocked, timeToBlockExpire };
+    } catch (e) {
+      metrics.inc('vitpay_rate_limit_errors_total');
+      this.logger.warn({ msg: 'rate limit storage unavailable: request allowed', err: (e as Error).message });
+      return { totalHits: 0, timeToExpire: Math.ceil(ttl / 1000), isBlocked: false, timeToBlockExpire: 0 };
+    }
   }
 }

@@ -60,14 +60,6 @@ export class Db implements OnModuleDestroy {
     this.systemPool = new Pool({ connectionString: config.DATABASE_SYSTEM_URL, max: 10, application_name: 'vitpay-api-system' });
   }
 
-  /**
-   * Requête unique en auto-commit sur le pool applicatif, hors RLS d'organisation. Réservée aux
-   * données techniques non rattachées à une organisation (compteurs de limitation de débit).
-   */
-  async autocommit<T extends QueryResultRow>(sql: string, params: unknown[] = []): Promise<T[]> {
-    return (await this.pool.query<T>(sql, params)).rows;
-  }
-
   async tx<T>(fn: (tx: Tx) => Promise<T>, opts: TxOptions = {}): Promise<T> {
     if (opts.orgId && !UUID_RE.test(opts.orgId)) throw new Error('Invalid orgId');
     if (opts.orgId && opts.bypassRls) throw new Error('orgId and bypassRls are mutually exclusive');

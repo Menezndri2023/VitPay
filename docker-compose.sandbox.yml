@@ -18,8 +18,9 @@ x-api-env: &api-env
   MOCK_PSP_ENABLED: "true"
   ALLOW_PRIVATE_WEBHOOK_URLS: "true" # sandbox locale uniquement
   PAYMENTS_LIVE_ENABLED: "false"
-  # Les apps Next relaient les requêtes depuis le réseau Docker privé : IP client lue dans X-Forwarded-For
-  TRUST_PROXY: uniquelocal
+  # [R6-1] Seuls le proxy « edge » (qui écrase X-Forwarded-For) et les apps Next (qui le relaient)
+  # sont approuvés : un en-tête forgé par le client est sans effet, chaque client a son compteur.
+  TRUST_PROXY: 172.29.10.10,172.29.10.11,172.29.10.12,172.29.10.13
 
 services:
   migrate:
@@ -36,7 +37,8 @@ services:
     environment:
       <<: *api-env
       WORKERS_ENABLED: "false"
-    ports: ["4710:4710"]
+    # Aucun port publié : accès uniquement via le proxy « edge ».
+    networks: [default, edge]
     depends_on:
       migrate: { condition: service_completed_successfully }
 
@@ -54,17 +56,32 @@ services:
   pay:
     build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: pay } }
     environment: { PORT: "3710" }
-    ports: ["3710:3710"]
+    networks: { edge: { ipv4_address: 172.29.10.11 } }
     depends_on: [api]
 
   business:
     build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: business } }
     environment: { PORT: "3711" }
-    ports: ["3711:3711"]
+    networks: { edge: { ipv4_address: 172.29.10.12 } }
     depends_on: [api]
 
   admin:
     build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: admin } }
     environment: { PORT: "3712" }
-    ports: ["3712:3712"]
+    networks: { edge: { ipv4_address: 172.29.10.13 } }
     depends_on: [api]
+
+  # Point d'entrée unique : écrase X-Forwarded-For (adresse réelle du client).
+  edge:
+    image: nginx:1.27-alpine
+    volumes: ["./infra/edge/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    ports: ["3710:3710", "3711:3711", "3712:3712", "4710:4710"]
+    networks: { edge: { ipv4_address: 172.29.10.10 } }
+    depends_on: [api, pay, business, admin]
+
+networks:
+  # Réseau interne du proxy et des apps (adresses fixes : seules celles-ci sont approuvées par l'API,
+  # pas la passerelle ni l'hôte). Ni base ni worker.
+  edge:
+    ipam:
+      config: [{ subnet: 172.29.10.0/24 }]

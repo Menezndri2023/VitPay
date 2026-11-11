@@ -10,7 +10,6 @@ import { AdminService } from './modules/admin/admin.service';
 import { DevelopersController } from './modules/developers/developers.controller';
 import { DevelopersService } from './modules/developers/developers.service';
 import { EmailService } from './modules/email/email.service';
-import { Db } from './database/db.service';
 import { PgThrottlerStorage } from './modules/platform/pg-throttler.storage';
 import { KeyRotationService } from './modules/security/key-rotation.service';
 import { AccountCleanupService } from './modules/identity/account-cleanup.service';
@@ -56,6 +55,7 @@ export class AppModule {
     })
     class ConfigModule {}
 
+    const throttlerStorage = new PgThrottlerStorage(config);
     const controllers: DynamicModule['controllers'] = [
       HealthController,
       AuthController,
@@ -83,11 +83,12 @@ export class AppModule {
         DatabaseModule,
         PlatformModule,
         ThrottlerModule.forRootAsync({
-          inject: [Db],
-          useFactory: (db: Db) => ({
+          useFactory: () => ({
             throttlers: [{ name: 'default', ttl: 60_000, limit: 300 }],
             // Compteurs partagés par toutes les instances (PostgreSQL) : la limite ne se multiplie pas avec elles.
-            storage: new PgThrottlerStorage(db),
+            storage: throttlerStorage,
+            // [R6-3] Regroupement IPv6 par /56 (une allocation résidentielle) : pas de milliers de compteurs par client.
+            ipv6SubnetPrefix: 56,
             // Les tests automatisés enchaînent des centaines d'appels : limitation désactivée en NODE_ENV=test uniquement.
             skipIf: () => config.NODE_ENV === 'test',
           }),
@@ -119,6 +120,7 @@ export class AppModule {
         DevelopersService,
         JobsService,
         { provide: APP_GUARD, useClass: ThrottlerGuard },
+        { provide: PgThrottlerStorage, useValue: throttlerStorage },
         { provide: APP_GUARD, useClass: SecurityGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

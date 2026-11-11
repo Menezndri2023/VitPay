@@ -37,9 +37,27 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.every('sync-stale-attempts', 60_000, () => this.payments.syncStaleAttempts());
     this.every('send-emails', 5_000, () => this.email.processQueue());
     this.every('deliver-webhooks', 3_000, () => this.developers.deliverDue());
-    this.every('purge-rate-limits', 300_000, () => this.db.system((tx) => tx.query(`DELETE FROM rate_limits WHERE expires_at < now() - interval '1 hour' AND (blocked_until IS NULL OR blocked_until < now())`)));
+    this.every('purge-rate-limits', 60_000, () => this.purgeRateLimits());
     this.every('release-unverified-accounts', 3_600_000, () => this.cleanup.releaseUnverified());
     this.logger.log('background jobs started');
+  }
+
+  /** [R6-3] Purge par lots des compteurs expirés (pas de verrou long, même sur un grand volume). */
+  async purgeRateLimits(batch = 5_000): Promise<number> {
+    let total = 0;
+    for (let i = 0; i < 100; i++) {
+      const rows = await this.db.system((tx) =>
+        tx.query(
+          `DELETE FROM rate_limits WHERE ctid IN (
+             SELECT ctid FROM rate_limits WHERE expires_at < now() AND (blocked_until IS NULL OR blocked_until < now()) LIMIT $1)
+           RETURNING 1`,
+          [batch],
+        ),
+      );
+      total += rows.length;
+      if (rows.length < batch) break;
+    }
+    return total;
   }
 
   private every(name: string, ms: number, fn: () => Promise<unknown>): void {

@@ -118,6 +118,17 @@ Résiduel connu : le journal d'audit (immuable) conserve le nom d'organisation s
 
 Restant (R5-9, défense en profondeur) : lier chaque chiffré à son contexte (table, colonne, ligne) par données associées GCM, pour empêcher la permutation de chiffrés par un attaquant ayant un accès en écriture à la base.
 
+## Sixième revue indépendante (11/11/2026) — limitation de débit partagée
+
+| # | Défaut | Correction |
+|---|---|---|
+| R6-1 | **Élevé** — en conteneurs, IP client falsifiable (`X-Forwarded-For` relayé tel quel par Next, `TRUST_PROXY=uniquelocal`) : limite contournable, ou compteur unique pour tous | Proxy `edge` qui écrase l'en-tête, adresses approuvées explicites, ports internes non publiés ; test d'en-tête forgé |
+| R6-2 | Une écriture en base par requête sur le pool métier, sans délai | Pool dédié (4 connexions, délais 1 s / 250 ms), cache des clés bloquées, politique explicite en cas d'erreur |
+| R6-3 | Croissance de la table (clés pulvérisées, IPv6 /64) | Purge par lots chaque minute, IPv6 /56 |
+| R6-5 | Durée de blocage nulle ou inférieure à la fenêtre | Refus au-delà de la limite ; compteur remis à zéro en fin de blocage |
+| R6-6 | Rôle applicatif en lecture/écriture sur les compteurs (IP des clients) | Accès révoqué, fonction `SECURITY DEFINER` aux arguments bornés, clés HMAC |
+| R6-7 | Méthode `Db.autocommit` contournant les transactions | Supprimée |
+
 ## À faire avant la production
 
 1. **Test d'intrusion externe** et revue OWASP ASVS niveau 2.
@@ -130,7 +141,8 @@ Restant (R5-9, défense en profondeur) : lier chaque chiffré à son contexte (t
    Retour arrière : la version actuelle lit les deux formats ; ne pas revenir à une version antérieure au 11/11/2026 (format v1 seul) après écriture de valeurs v2.
    Un test vérifie que toute nouvelle colonne `*_enc` est couverte par la rotation.
 3. ☑ Rôle PostgreSQL distinct `vitpay_system` (BYPASSRLS) pour les chemins système ; plus de variable de contournement ; moindre privilège du rôle applicatif (aucun accès aux sessions, webhooks, idempotence, approbations, prestataire simulé ; pas de modification des utilisateurs) — migration 007, testé.
-4. ☑ Limitation de débit partagée entre instances (compteurs PostgreSQL, table non journalisée, une requête atomique par appel, purge périodique ; `rate-limit.test.ts`). ☐ Plafonner les webhooks rejetés stockés. À forte charge : déplacer les compteurs vers un stockage mémoire partagé (ADR-007).
+4. ☑ Limitation de débit partagée entre instances (`rate-limit.test.ts`) : fonction PostgreSQL atomique (le rôle applicatif n'a pas accès à la table), pool dédié borné avec délais courts, clés HMAC, cache local des clés bloquées, purge par lots, regroupement IPv6 /56. Fenêtre fixe (jusqu'à 2× la limite à la jonction de deux fenêtres) ; si la base ne répond pas, la requête passe (métrique `vitpay_rate_limit_errors_total`) — le verrouillage de compte reste en base. ☐ Plafonner les webhooks rejetés stockés. À forte charge : stockage mémoire partagé (ADR-007).
+4c. **IP client** : l'API ne doit approuver (`TRUST_PROXY`) que des relais qui **écrasent** `X-Forwarded-For` ou le relaient d'un tel relais. Sandbox : proxy `edge` (nginx) seul point d'entrée, adresses fixes approuvées, API et apps sans port publié. Production : idem avec le répartiteur de charge de l'hébergeur (jamais `uniquelocal` ni une plage incluant la passerelle).
 4b. ☑ Outbox : chaque événement est verrouillé et validé dans sa propre transaction.
 5. Signalement d'abus sur la page publique (anti-hameçonnage) et domaine `pay.` dédié.
 6. WAF et protection DDoS (fournisseur à choisir).
