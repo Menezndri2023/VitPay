@@ -38,7 +38,14 @@ Charge mesurée de la pile au repos : environ 1,5 à 2 Go de mémoire pour les 7
 
 ## 3. Mise en place (une fois)
 
-Sur le serveur, en tant qu'utilisateur non root disposant de `sudo` :
+Sécurisation automatique d'un serveur neuf (Ubuntu 24.04, clé SSH déposée chez l'hébergeur) :
+
+```bash
+ssh -i ~/.ssh/vitpay_staging_ed25519 root@<IP> 'bash -s' < infra/staging/scripts/bootstrap-server.sh
+ssh -i ~/.ssh/vitpay_staging_ed25519 vitpay@<IP>     # la connexion root est ensuite désactivée
+```
+
+Détail de ce que fait le script (équivalent manuel), sur le serveur en tant qu'utilisateur non root disposant de `sudo` :
 
 ```bash
 # Système et pare-feu : seuls SSH, HTTP et HTTPS sont ouverts.
