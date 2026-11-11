@@ -98,6 +98,8 @@ export class OrganizationsService {
       if (!m) throw Errors.notFound('Member');
       if (m.role === 'owner') throw Errors.invalidState('The owner cannot be removed');
       await tx.query('DELETE FROM memberships WHERE org_id = $1 AND user_id = $2', [orgId, userId]);
+      // Les clés API créées par ce membre sont révoquées immédiatement.
+      await tx.query('UPDATE api_keys SET revoked_at = now() WHERE created_by = $1 AND revoked_at IS NULL', [userId]);
       await this.audit.record(tx, { actor: { type: 'user', userId: actorId, ...meta }, orgId, action: 'member.removed', targetType: 'user', targetId: userId, before: { role: m.role } });
     });
   }

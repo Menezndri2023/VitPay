@@ -15,7 +15,7 @@ export async function createApp(config: AppConfig): Promise<INestApplication> {
     logger: config.NODE_ENV === 'test' ? ['error'] : ['log', 'warn', 'error'],
     bodyParser: true,
   });
-  app.set('trust proxy', 'loopback');
+  app.set('trust proxy', /^\d+$/.test(config.TRUST_PROXY) ? Number(config.TRUST_PROXY) : config.TRUST_PROXY);
   app.disable('x-powered-by');
   app.use(requestContext({ logRequests: config.NODE_ENV !== 'test' }));
   app.useBodyParser('json', { limit: '100kb' });

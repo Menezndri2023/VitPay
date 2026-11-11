@@ -46,6 +46,33 @@ Revue des modules finance et sécurité par un agent distinct, sans accès au co
 
 Durcissements associés : unicités scopées (référence prestataire par compte, clé comptable par organisation) ; appels au prestataire depuis la page publique limités par `last_synced_at` ; libération des clés d'idempotence bloquées ; approbations « quatre yeux » liées à la valeur courante ; autres sessions révoquées à l'activation de la MFA ; verrouillage révélé seulement après vérification du mot de passe.
 
+## Seconde revue indépendante (10/11/2026) — défauts corrigés
+
+Elle porte sur les ajouts depuis la première revue. Les 9 défauts relevés sont corrigés et couverts par des tests (migration `012_review2_hardening.sql`).
+
+| # | Défaut | Correction |
+|---|---|---|
+| R2-1 | **SSRF** via adresses IPv6 « déguisées » (`[::ffff:127.0.0.1]` est réécrit en `[::ffff:7f00:1]`), NAT64, 6to4 ; le contrôle DNS est ignoré pour une IP littérale | `net.BlockList` (formes normalisées), plages IPv6 encapsulantes refusées, revérification à chaque envoi, erreurs réduites à une catégorie |
+| R2-2 | Clé API encore valide après le retrait de son créateur | Clé valide seulement si le créateur est toujours owner/admin ; révocation au retrait du membre |
+| R2-3 | Redirection ouverte après connexion (`next=/%09/evil.com`) | Résolution par `URL` et comparaison d'origine (test navigateur) |
+| R2-4 | Notifications et e-mails en double si un consommateur outbox échoue | Index unique (organisation, événement) + `ON CONFLICT DO NOTHING` |
+| R2-5 | Un endpoint lent bloque les webhooks de tous les commerçants | Un envoi par endpoint et par lot, parallélisme borné, bail sans verrou pendant l'appel HTTP, délai 5 s, désactivation automatique après 50 échecs, test limité à 5/min |
+| R2-6 | Limitation de débit devenue globale derrière le proxy Next en conteneurs | `TRUST_PROXY` configurable (`uniquelocal` en conteneurs) ; plafond par compte pour le mot de passe oublié |
+| R2-7 | Une invitation expirée bloquait toute nouvelle invitation | Révocation automatique des invitations expirées |
+| R2-8 | Hameçonnage par e-mail d'invitation (nom d'organisation libre) | Liens et domaines retirés, longueur bornée, 20 invitations par jour et par organisation |
+| R2-9 | Rôle système autorisé à DELETE sur les tables financières | DELETE retiré partout sauf `idempotency_keys` (et le prestataire simulé) |
+
+Durcissements associés :
+
+- Le rôle applicatif ne lit plus `password_hash` ni les secrets MFA (droits par colonne).
+- La facturation se fait par organisation, chacune dans sa propre transaction.
+- Justificatifs KYB : limite de 30 par organisation, en-tête `filename*` correct, pas de seconde revue d'un document déjà décidé.
+- Le mot de passe oublié est traité en arrière-plan, pour un temps de réponse constant.
+- Les jetons de 20 caractères et plus sont masqués dans les journaux.
+- La date de dernière utilisation d'une clé API n'est mise à jour qu'une fois par minute.
+
+Points ouverts : vérification de l'adresse e-mail à l'inscription (pré-enregistrement d'un compte au nom d'une victime) ; rotation des secrets de signature des webhooks ; exiger un KYB vérifié avant les invitations en mode réel (décision produit).
+
 ## À faire avant la production
 
 1. **Test d'intrusion externe** et revue OWASP ASVS niveau 2.

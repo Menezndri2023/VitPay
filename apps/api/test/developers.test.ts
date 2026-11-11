@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hmacSha256Hex } from '../src/common/crypto';
 import { isPrivateAddress, validateWebhookUrl } from '../src/common/safe-http';
 import { DevelopersService } from '../src/modules/developers/developers.service';
-import { connectMock, idemKey, ownerQuery, payerActs, registerMerchant, resetDb, Session, startApp, TestCtx, tokenOf } from './helpers';
+import { connectMock, idemKey, login, ownerQuery, payerActs, registerMerchant, resetDb, Session, startApp, TestCtx, tokenOf } from './helpers';
 
 interface Received {
   headers: IncomingMessage['headers'];
@@ -74,6 +74,17 @@ describe('API publique : clés API et webhooks sortants', () => {
     const other = await registerMerchant(ctx, 'other@dev.test');
     expect((await api.get(`/v1/orgs/${other.orgId}/payment-requests`)).status).toBe(404);
 
+    // Revue n°2 : une clé ne survit pas au retrait de son créateur
+    const { s: s2, orgId: org2 } = await registerMerchant(ctx, 'owner2@dev.test', 'Org Deux');
+    await registerMerchant(ctx, 'admin2@dev.test', 'Perso');
+    await s2.post(`/v1/orgs/${org2}/members`, { email: 'admin2@dev.test', role: 'admin' });
+    const admin2 = (await login(ctx, 'admin2@dev.test')).s;
+    const k2 = (await admin2.post(`/v1/orgs/${org2}/developers/api-keys`, { name: 'clé admin', scopes: ['requests:read'] })).body.secret;
+    expect((await bearer(k2).get(`/v1/orgs/${org2}/payment-requests`)).status).toBe(200);
+    const admin2Id = (await admin2.get('/v1/auth/me')).body.user.id;
+    await ctx.api().delete(`/v1/orgs/${org2}/members/${admin2Id}`).set('Cookie', s2.cookie).set('x-vitpay-csrf', '1');
+    expect((await bearer(k2).get(`/v1/orgs/${org2}/payment-requests`)).status).toBe(401);
+
     // Révocation immédiate
     await ctx.api().delete(`/v1/orgs/${orgId}/developers/api-keys/${created.body.id}`).set('Cookie', s.cookie).set('x-vitpay-csrf', '1');
     expect((await api.get(`/v1/orgs/${orgId}/payment-requests`)).status).toBe(401);
@@ -127,6 +138,10 @@ describe('API publique : clés API et webhooks sortants', () => {
     expect(() => validateWebhookUrl('http://example.com/hook', false)).toThrow(/HTTPS/);
     expect(() => validateWebhookUrl('https://169.254.169.254/latest/meta-data', false)).toThrow(/Private/);
     expect(() => validateWebhookUrl('https://user:pw@example.com', false)).toThrow(/Credentials/);
+    // Revue n°2 : formes IPv6 « déguisées » (le parseur d'URL réécrit [::ffff:127.0.0.1] en [::ffff:7f00:1])
+    for (const u of ['https://[::ffff:127.0.0.1]/', 'https://[::ffff:a9fe:a9fe]/', 'https://[64:ff9b::a9fe:a9fe]/', 'https://[::7f00:1]/', 'https://[2002:7f00:1::]/', 'https://[fec0::1]/']) {
+      expect(() => validateWebhookUrl(u, false), u).toThrow(/Private/);
+    }
 
     // Instance « production-like » (adresses privées interdites) : un nom résolu vers 127.0.0.1 est bloqué à la connexion.
     const strict = await startApp({ PORT: '4559', PUBLIC_API_URL: 'http://127.0.0.1:4559', ALLOW_PRIVATE_WEBHOOK_URLS: 'false' });
@@ -138,7 +153,8 @@ describe('API publique : clés API et webhooks sortants', () => {
       await m.s.post(`/v1/orgs/${m.orgId}/developers/webhooks/${ep.body.id}/test`);
       await strict.app.get(DevelopersService).deliverDue();
       const d = await ownerQuery<{ last_error: string }>(`SELECT last_error FROM webhook_deliveries WHERE endpoint_id = $1`, [ep.body.id]);
-      expect(d[0]?.last_error).toMatch(/Blocked private address/);
+      // Le commerçant ne voit qu'une catégorie (pas de message réseau brut exploitable pour cartographier).
+      expect(d[0]?.last_error).toBe('blocked_address');
     } finally {
       await strict.close();
     }

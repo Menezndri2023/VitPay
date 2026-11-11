@@ -193,3 +193,15 @@ test('développeurs : création d’une clé API puis appel de l’API avec cett
   expect(res.status()).toBe(201);
   expect((await res.json()).payUrl).toContain('/r/');
 });
+
+test('connexion : le paramètre next ne peut pas rediriger hors du site', async ({ page }) => {
+  for (const next of ['/%09/evil.example', '//evil.example', '/\\evil.example', 'https://evil.example']) {
+    await page.context().clearCookies();
+    await page.goto(`${BIZ}/login?next=${encodeURIComponent(next)}`);
+    await page.getByLabel('E-mail').fill('marchand@vitpay.test');
+    await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
+    await page.getByRole('button', { name: 'Se connecter' }).click();
+    await page.waitForLoadState('networkidle');
+    expect(new URL(page.url()).origin, next).toBe(new URL(BIZ).origin);
+  }
+});

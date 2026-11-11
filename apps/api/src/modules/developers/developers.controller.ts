@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
 import { ZodPipe } from '../../common/zod.pipe';
 import { Auth, Org, RequireOrgPermission } from '../identity/decorators';
@@ -60,6 +61,7 @@ export class DevelopersController {
   }
 
   @RequireOrgPermission('developers:manage')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(202)
   @Post('webhooks/:id/test')
   test(@Org() org: OrgContext, @Param('id', new ZodPipe(UUID)) id: string) {

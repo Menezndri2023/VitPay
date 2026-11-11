@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { Currency, Money } from '@vitpay/money';
 import { Errors } from '../../common/errors';
-import { Db, isUniqueViolation } from '../../database/db.service';
+import { Db, isUniqueViolation, Tx } from '../../database/db.service';
 import { AuditActor, AuditService } from '../audit/audit.service';
 import { money } from '../payments/payments.service';
 
@@ -68,8 +68,9 @@ export class BillingService {
     if (!DATE_RE.test(input.periodStart) || !DATE_RE.test(input.periodEnd) || input.periodEnd < input.periodStart) {
       throw Errors.validation({ period: 'periodStart/periodEnd must be YYYY-MM-DD with periodEnd >= periodStart' });
     }
-    return this.db.system(async (tx) => {
-      const groups = await tx.query<{ org_id: string; currency: Currency }>(
+    // Une transaction PAR organisation et devise : pas de verrou global, un conflit n'annule pas les autres relevés.
+    const groups = await this.db.system((tx) =>
+      tx.query<{ org_id: string; currency: Currency }>(
         `SELECT a.org_id, a.currency
            FROM payment_attempts a
            JOIN payment_requests pr ON pr.id = a.payment_request_id
@@ -79,9 +80,28 @@ export class BillingService {
             AND NOT EXISTS (SELECT 1 FROM commission_statement_lines l WHERE l.attempt_id = a.id AND l.active)
           GROUP BY a.org_id, a.currency`,
         [input.periodStart, input.periodEnd, input.mode, input.orgId ?? null],
-      );
-      const issued: ReturnType<BillingService['view']>[] = [];
-      for (const g of groups) {
+      ),
+    );
+    const issued: ReturnType<BillingService['view']>[] = [];
+    const conflicts: string[] = [];
+    for (const g of groups) {
+      try {
+        const st = await this.db.system((tx) => this.issueOne(tx, actor, input, g));
+        if (st) issued.push(st);
+      } catch (e) {
+        if (isUniqueViolation(e)) conflicts.push(g.org_id);
+        else throw e;
+      }
+    }
+    return { issued, conflicts };
+  }
+
+  private async issueOne(
+    tx: Tx,
+    actor: AuditActor & { userId: string },
+    input: { periodStart: string; periodEnd: string; mode: 'sandbox' | 'live' },
+    g: { org_id: string; currency: Currency },
+  ): Promise<ReturnType<BillingService['view']> | null> {
         const lines = await tx.query<{ id: string; vitpay_fee_minor: string }>(
           `SELECT a.id, a.vitpay_fee_minor FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id
             WHERE a.org_id = $1 AND a.currency = $2 AND a.status = 'succeeded' AND a.vitpay_fee_minor > 0 AND pr.mode = $5
@@ -90,7 +110,7 @@ export class BillingService {
             ORDER BY a.succeeded_at FOR UPDATE OF a`,
           [g.org_id, g.currency, input.periodStart, input.periodEnd, input.mode],
         );
-        if (!lines.length) continue;
+        if (!lines.length) return null;
         const total = lines.reduce((s, l) => s.add(Money.of(l.vitpay_fee_minor, g.currency)), Money.zero(g.currency));
         const n = await tx.one<{ n: string }>(`SELECT nextval('commission_statement_seq')::text AS n`);
         const prefix = input.mode === 'sandbox' ? 'TEST-VPC' : 'VPC';
@@ -99,19 +119,11 @@ export class BillingService {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'issued',$9) RETURNING *`,
           [g.org_id, `${prefix}-${input.periodEnd.slice(0, 4)}-${n.n.padStart(6, '0')}`, input.mode, input.periodStart, input.periodEnd, g.currency, total.minor.toString(), lines.length, actor.userId],
         );
-        try {
-          for (const l of lines) {
-            await tx.query(`INSERT INTO commission_statement_lines (statement_id, org_id, attempt_id, fee_minor) VALUES ($1,$2,$3,$4)`, [st.id, g.org_id, l.id, l.vitpay_fee_minor]);
-          }
-        } catch (e) {
-          if (isUniqueViolation(e)) throw Errors.conflict('already_billed', 'A payment was billed concurrently; retry');
-          throw e;
+        for (const l of lines) {
+          await tx.query(`INSERT INTO commission_statement_lines (statement_id, org_id, attempt_id, fee_minor) VALUES ($1,$2,$3,$4)`, [st.id, g.org_id, l.id, l.vitpay_fee_minor]);
         }
         await this.audit.record(tx, { actor, orgId: g.org_id, action: 'billing.statement_issued', targetType: 'commission_statement', targetId: st.id, after: { number: st.number, fees: total.toJSON(), lines: lines.length } });
-        issued.push(this.view(st));
-      }
-      return { issued };
-    });
+        return this.view(st);
   }
 
   async listAll(status?: string) {

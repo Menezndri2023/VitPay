@@ -29,13 +29,18 @@ export class NotificationsConsumer implements OnModuleInit {
     await this.db.forOrg(e.orgId, async (tx) => {
       const exists = await tx.maybeOne("SELECT 1 FROM notifications WHERE data->>'outboxId' = $1", [e.id.toString()]);
       if (exists) return;
-      await tx.query('INSERT INTO notifications (org_id, type, title, body, data) VALUES ($1,$2,$3,$4,$5)', [
+      const inserted = await tx.query(
+        `INSERT INTO notifications (org_id, type, title, body, data) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (org_id, (data->>'outboxId')) WHERE data ? 'outboxId' DO NOTHING RETURNING id`,
+        [
         e.orgId,
         type,
         title,
         body(e.payload),
         JSON.stringify({ outboxId: e.id.toString(), aggregateId: e.aggregateId, ...e.payload }),
-      ]);
+      ],
+      );
+      if (!inserted.length) return; // déjà traité : pas de second e-mail
       // Copie par e-mail aux propriétaires (paiements reçus et litiges).
       if (type === 'payment.succeeded' || type === 'dispute.opened') {
         const owners = await tx.query<{ email: string }>(`SELECT u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.role = 'owner'`);

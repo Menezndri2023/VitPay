@@ -24,7 +24,11 @@ describe('e-mails, mot de passe oublié, invitations', () => {
     const { s } = await registerMerchant(ctx, 'forgot@acc.test');
     expect((await ctx.api().post('/v1/auth/password/forgot').send({ email: 'nobody@acc.test' })).status).toBe(202);
     expect((await ctx.api().post('/v1/auth/password/forgot').send({ email: 'forgot@acc.test' })).status).toBe(202);
-    await email.processQueue();
+    // Traitement asynchrone (temps de réponse constant) : on attend la mise en file.
+    for (let i = 0; i < 50 && !email.sentLog.some((m) => m.to === 'forgot@acc.test'); i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      await email.processQueue();
+    }
     const token = lastLink('forgot@acc.test', /reset-password\?token=([A-Za-z0-9_%-]+)/);
     expect(email.sentLog.some((m) => m.to === 'nobody@acc.test')).toBe(false);
     // Le corps de l'e-mail (lien à jeton) est purgé après envoi
@@ -57,6 +61,17 @@ describe('e-mails, mot de passe oublié, invitations', () => {
     expect(me.body.organizations).toEqual([expect.objectContaining({ id: orgId, role: 'cashier' })]);
     // Lien consommé
     expect((await ctx.api().get(`/v1/invitations/${token}`)).status).toBe(404);
+  });
+
+  it('une invitation expirée n’empêche pas de réinviter ; e-mail sans lien injecté', async () => {
+    const { s, orgId } = await registerMerchant(ctx, 'boss3@acc.test', 'Visitez www.evil-bank.com https://evil.example');
+    await s.post(`/v1/orgs/${orgId}/invitations`, { email: 'late@acc.test', role: 'viewer' });
+    await ownerQuery(`UPDATE org_invitations SET expires_at = now() - interval '1 minute' WHERE lower(email) = 'late@acc.test'`);
+    expect((await s.post(`/v1/orgs/${orgId}/invitations`, { email: 'late@acc.test', role: 'viewer' })).status).toBe(201);
+    await email.processQueue();
+    const m = [...email.sentLog].reverse().find((x) => x.to === 'late@acc.test');
+    expect(m?.subject).not.toMatch(/evil/);
+    expect(m?.text).not.toMatch(/evil/);
   });
 
   it('invitation d’un compte existant : acceptation réservée au bon e-mail', async () => {

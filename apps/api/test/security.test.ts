@@ -39,6 +39,11 @@ describe('sécurité et isolation', () => {
     await expect(ctx.db.forOrg(a.orgId, (tx) => tx.query('SELECT token_hash FROM sessions'))).rejects.toThrow(/permission denied/);
     await expect(ctx.db.forOrg(a.orgId, (tx) => tx.query('SELECT * FROM mock_psp.merchants'))).rejects.toThrow(/permission denied/);
     await expect(ctx.db.forOrg(a.orgId, (tx) => tx.query(`UPDATE users SET platform_role = 'super_admin'`))).rejects.toThrow(/permission denied/);
+    // Revue n°2 : jamais les empreintes de mot de passe ni les secrets MFA
+    await expect(ctx.db.forOrg(a.orgId, (tx) => tx.query('SELECT password_hash FROM users'))).rejects.toThrow(/permission denied/);
+    await expect(ctx.db.forOrg(a.orgId, (tx) => tx.query('SELECT mfa_secret_enc FROM users'))).rejects.toThrow(/permission denied/);
+    // Le rôle système ne peut pas effacer de données financières
+    await expect(ctx.db.system((tx) => tx.query('DELETE FROM payment_requests'))).rejects.toThrow(/permission denied/);
   });
 
   it('rôles : un caissier ne peut ni rembourser ni gérer les prestataires', async () => {

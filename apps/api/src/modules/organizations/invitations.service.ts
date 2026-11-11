@@ -11,6 +11,17 @@ import { OrgRole } from '../identity/permissions';
 import { toCamel } from './organizations.service';
 
 const INVITE_TTL_DAYS = 7;
+const MAX_INVITES_PER_DAY = 20;
+
+/** Texte contrôlé par l'utilisateur inséré dans un e-mail : sans URL, sans retour ligne, longueur bornée (anti-hameçonnage). */
+function mailSafe(v: string, max = 60): string {
+  return v
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/(https?:\/\/|www\.)\S*/gi, '[lien retiré]')
+    .replace(/\b[a-z0-9-]+\.(com|ma|net|org|io|co|info|xyz|me|app)\b/gi, '[lien retiré]')
+    .trim()
+    .slice(0, max);
+}
 const ROLE_LABEL: Record<string, string> = { admin: 'administrateur', cashier: 'caissier', viewer: 'lecture seule' };
 
 interface InvitationRow {
@@ -41,8 +52,17 @@ export class InvitationsService {
       return await this.db.forOrg(orgId, async (tx) => {
         const already = await tx.maybeOne(`SELECT 1 FROM memberships m JOIN users u ON u.id = m.user_id WHERE lower(u.email) = $1`, [email]);
         if (already) throw Errors.conflict('already_member', 'This person is already a member');
-        const org = await tx.one<{ display_name: string }>('SELECT display_name FROM organizations WHERE id = $1', [orgId]);
-        const inviter = await tx.one<{ full_name: string }>('SELECT full_name FROM users WHERE id = $1', [actor.userId]);
+        const sent = await tx.one<{ n: string }>(`SELECT count(*)::text AS n FROM org_invitations WHERE created_at > now() - interval '1 day'`);
+        if (Number(sent.n) >= MAX_INVITES_PER_DAY) throw Errors.tooMany('Daily invitation limit reached');
+        // Une invitation expirée ne doit pas bloquer une nouvelle invitation.
+        await tx.query(
+          `UPDATE org_invitations SET revoked_at = now() WHERE lower(email) = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at <= now()`,
+          [email],
+        );
+        const orgRow = await tx.one<{ display_name: string }>('SELECT display_name FROM organizations WHERE id = $1', [orgId]);
+        const inviterRow = await tx.one<{ full_name: string }>('SELECT full_name FROM users WHERE id = $1', [actor.userId]);
+        const org = { display_name: mailSafe(orgRow.display_name) };
+        const inviter = { full_name: mailSafe(inviterRow.full_name, 40) };
         const inv = await tx.one<{ id: string }>(
           `INSERT INTO org_invitations (org_id, email, role, token_hash, invited_by, expires_at)
            VALUES ($1,$2,$3,$4,$5, now() + make_interval(days => $6)) RETURNING id`,

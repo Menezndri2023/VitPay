@@ -38,6 +38,11 @@ const EnvSchema = z
     PAYMENT_REQUEST_DEFAULT_TTL_HOURS: z.coerce.number().int().positive().default(72),
     /** Jeton d'accès à /health/metrics (absent = endpoint désactivé). */
     METRICS_TOKEN: z.string().min(24).optional(),
+    /**
+     * Proxys de confiance pour l'IP client (limitation de débit). « loopback » en local ;
+     * en conteneurs, le réseau privé du proxy (ex. « uniquelocal »). Valeur Express `trust proxy`.
+     */
+    TRUST_PROXY: z.string().default('loopback'),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   })
   .superRefine((env, ctx) => {

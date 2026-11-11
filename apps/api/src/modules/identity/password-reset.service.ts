@@ -31,6 +31,9 @@ export class PasswordResetService {
         [email],
       );
       if (!u) return;
+      // Plafond par compte (en plus de la limitation par IP) : 3 demandes par heure.
+      const recent = await tx.one<{ n: string }>(`SELECT count(*)::text AS n FROM password_resets WHERE user_id = $1 AND created_at > now() - interval '1 hour'`, [u.id]);
+      if (Number(recent.n) >= 3) return;
       // Une seule demande active : les précédentes sont invalidées.
       await tx.query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [u.id]);
       const token = randomToken(32);

@@ -65,7 +65,9 @@ export class AuthController extends BaseAuthController {
   @HttpCode(202)
   @Post('password/forgot')
   async forgot(@Body(new ZodPipe(Forgot)) body: z.infer<typeof Forgot>, @Req() req: VitpayRequest) {
-    await this.resets.request(body.email, clientInfo(req));
+    // Traitement en arrière-plan : temps de réponse identique que le compte existe ou non.
+    const meta = clientInfo(req);
+    setImmediate(() => void this.resets.request(body.email, meta).catch(() => undefined));
     return { ok: true };
   }
 

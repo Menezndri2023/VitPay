@@ -40,6 +40,8 @@ export class KybDocumentsService {
     const mime = sniffMime(input.content);
     if (!mime) throw Errors.validation({ file: 'Only PDF, PNG or JPEG documents are accepted' });
     return this.db.forOrg(orgId, async (tx) => {
+      const count = await tx.one<{ n: string }>(`SELECT count(*)::text AS n FROM kyb_documents`);
+      if (Number(count.n) >= 30) throw Errors.invalidState('Document limit reached (30); contact support');
       const r = await tx.one<Record<string, unknown>>(
         `INSERT INTO kyb_documents (org_id, kind, filename, mime_type, size_bytes, sha256, content_enc, uploaded_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${META}`,
@@ -89,6 +91,7 @@ export class KybDocumentsService {
     await this.db.system(async (tx) => {
       const r = await tx.maybeOne<{ org_id: string; status: string }>('SELECT org_id, status FROM kyb_documents WHERE id = $1 FOR UPDATE', [id]);
       if (!r) throw Errors.notFound('Document');
+      if (r.status !== 'pending') throw Errors.invalidState('Document already reviewed');
       await tx.query('UPDATE kyb_documents SET status = $2, review_note = $3, reviewed_by = $4, reviewed_at = now() WHERE id = $1', [id, decision, note, actor.userId]);
       await this.audit.record(tx, { actor, orgId: r.org_id, action: `admin.kyb.document_${decision}`, targetType: 'kyb_document', targetId: id, reason: note });
     });

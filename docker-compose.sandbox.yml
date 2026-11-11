@@ -17,6 +17,8 @@ x-api-env: &api-env
   MOCK_PSP_ENABLED: "true"
   ALLOW_PRIVATE_WEBHOOK_URLS: "true" # sandbox locale uniquement
   PAYMENTS_LIVE_ENABLED: "false"
+  # Les apps Next relaient les requêtes depuis le réseau Docker privé : IP client lue dans X-Forwarded-For
+  TRUST_PROXY: uniquelocal
 
 services:
   migrate:

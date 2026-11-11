@@ -3,7 +3,7 @@ import { Agent } from 'undici';
 import { APP_CONFIG, AppConfig } from '../../config';
 import { decrypt, encrypt, hmacSha256Hex, randomToken, sha256 } from '../../common/crypto';
 import { Errors } from '../../common/errors';
-import { createSafeAgent, safePost, UnsafeUrlError, validateWebhookUrl } from '../../common/safe-http';
+import { createSafeAgent, errorCategory, safePost, UnsafeUrlError, validateWebhookUrl } from '../../common/safe-http';
 import { Db } from '../../database/db.service';
 import { AuditActor, AuditService } from '../audit/audit.service';
 import { API_KEY_SCOPES } from '../identity/permissions';
@@ -14,6 +14,10 @@ export const WEBHOOK_EVENTS = ['payment.succeeded', 'payment.failed', 'refund.su
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 const MAX_DELIVERY_ATTEMPTS = 10;
+/** Endpoint désactivé automatiquement après ce nombre d'échecs consécutifs. */
+const AUTO_DISABLE_AFTER = 50;
+const DELIVERY_CONCURRENCY = 10;
+const LEASE_SECONDS = 60;
 const KEY_PREFIX = 'vp_sk_';
 
 export interface ResolvedApiKey {
@@ -92,11 +96,16 @@ export class DevelopersService implements OnModuleInit {
     if (!/^vp_sk_[A-Za-z0-9_-]{40,50}$/.test(secret)) return null;
     return this.db.system(async (tx) => {
       const k = await tx.maybeOne<{ id: string; org_id: string; scopes: string[]; user_id: string; email: string; full_name: string }>(
-        `UPDATE api_keys k SET last_used_at = now() FROM users u, organizations o
-          WHERE k.key_hash = $1 AND k.revoked_at IS NULL AND u.id = k.created_by AND u.status = 'active' AND o.id = k.org_id
-         RETURNING k.id, k.org_id, k.scopes, u.id AS user_id, u.email, u.full_name`,
+        // La clé n'est valide que si son créateur est TOUJOURS propriétaire/administrateur de l'organisation.
+        `SELECT k.id, k.org_id, k.scopes, u.id AS user_id, u.email, u.full_name
+           FROM api_keys k
+           JOIN users u ON u.id = k.created_by AND u.status = 'active'
+           JOIN memberships m ON m.org_id = k.org_id AND m.user_id = k.created_by AND m.role IN ('owner','admin')
+          WHERE k.key_hash = $1 AND k.revoked_at IS NULL`,
         [sha256(secret)],
       );
+      // Mise à jour de la dernière utilisation au plus une fois par minute (pas de contention).
+      if (k) await tx.query(`UPDATE api_keys SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`, [k.id]);
       return k ? { keyId: k.id, orgId: k.org_id, scopes: k.scopes, userId: k.user_id, email: k.email, fullName: k.full_name } : null;
     });
   }
@@ -177,50 +186,72 @@ export class DevelopersService implements OnModuleInit {
     });
   }
 
-  /** Worker : livraisons dues, chacune dans sa transaction, avec reprise exponentielle. */
-  async deliverDue(limit = 20): Promise<number> {
-    const due = await this.db.system((tx) =>
-      tx.query<{ id: string }>(`SELECT id FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at <= now() ORDER BY next_attempt_at LIMIT $1`, [limit]),
+  /**
+   * Worker : livraisons dues, en parallèle (concurrence bornée), au plus UNE par endpoint et par lot
+   * (un endpoint lent ne bloque pas les autres commerçants). Bail de 60 s posé avant l'appel HTTP :
+   * aucune transaction ni verrou n'est tenu pendant l'envoi.
+   */
+  async deliverDue(limit = 30): Promise<number> {
+    const claimed = await this.db.system((tx) =>
+      tx.query<{ id: string; event_id: string; payload: unknown; attempts: number; endpoint_id: string; url: string; secret_enc: string }>(
+        `WITH due AS (
+           SELECT DISTINCT ON (d.endpoint_id) d.id
+             FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id
+            WHERE d.status = 'pending' AND d.next_attempt_at <= now() AND e.status = 'active'
+            ORDER BY d.endpoint_id, d.next_attempt_at
+            LIMIT $1)
+         UPDATE webhook_deliveries d SET next_attempt_at = now() + make_interval(secs => $2)
+           FROM webhook_endpoints e
+          WHERE d.id IN (SELECT id FROM due) AND e.id = d.endpoint_id
+         RETURNING d.id, d.event_id, d.payload, d.attempts, d.endpoint_id, e.url, e.secret_enc`,
+        [limit, LEASE_SECONDS],
+      ),
     );
     let ok = 0;
-    for (const { id } of due) {
-      await this.db.system(async (tx) => {
-        const d = await tx.maybeOne<{ id: string; event_id: string; payload: unknown; attempts: number; url: string; secret_enc: string; ep_status: string }>(
-          `SELECT d.id, d.event_id, d.payload, d.attempts, e.url, e.secret_enc, e.status AS ep_status
-             FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id
-            WHERE d.id = $1 AND d.status = 'pending' FOR UPDATE OF d SKIP LOCKED`,
-          [id],
-        );
-        if (!d) return;
-        if (d.ep_status !== 'active') {
-          await tx.query(`UPDATE webhook_deliveries SET status = 'failed', last_error = 'endpoint disabled' WHERE id = $1`, [id]);
-          return;
-        }
-        const body = JSON.stringify(d.payload);
-        const ts = Math.floor(Date.now() / 1000).toString();
-        const signature = `t=${ts},v1=${hmacSha256Hex(decrypt(d.secret_enc, this.config.encryptionKey), `${ts}.${body}`)}`;
-        let status: number | null = null;
-        let error: string | null = null;
-        try {
-          status = (await safePost(this.agent, d.url, body, { 'vitpay-signature': signature, 'vitpay-event-id': d.event_id })).status;
-          if (status < 200 || status >= 300) error = `HTTP ${status}`;
-        } catch (e) {
-          const err = e as Error & { cause?: Error };
-          error = (err.cause?.message ? `${err.message}: ${err.cause.message}` : err.message).slice(0, 300);
-        }
-        if (!error) {
-          await tx.query(`UPDATE webhook_deliveries SET status = 'succeeded', attempts = attempts + 1, last_status_code = $2, last_error = NULL, delivered_at = now() WHERE id = $1`, [id, status]);
-          ok += 1;
-          return;
-        }
-        const attempts = d.attempts + 1;
-        await tx.query(
-          `UPDATE webhook_deliveries SET attempts = $2, last_status_code = $3, last_error = $4, status = $5,
-             next_attempt_at = now() + make_interval(secs => $6) WHERE id = $1`,
-          [id, attempts, status, error, attempts >= MAX_DELIVERY_ATTEMPTS ? 'failed' : 'pending', Math.min(6 * 3600, 30 * 2 ** (attempts - 1))],
-        );
-      });
+    for (let i = 0; i < claimed.length; i += DELIVERY_CONCURRENCY) {
+      const results = await Promise.all(claimed.slice(i, i + DELIVERY_CONCURRENCY).map((d) => this.deliverOne(d)));
+      ok += results.filter(Boolean).length;
     }
+    await this.db.system((tx) =>
+      tx.query(`UPDATE webhook_deliveries SET status = 'failed', last_error = 'endpoint_disabled'
+                 WHERE status = 'pending' AND endpoint_id IN (SELECT id FROM webhook_endpoints WHERE status = 'disabled')`),
+    );
     return ok;
+  }
+
+  private async deliverOne(d: { id: string; event_id: string; payload: unknown; attempts: number; endpoint_id: string; url: string; secret_enc: string }): Promise<boolean> {
+    const body = JSON.stringify(d.payload);
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const signature = `t=${ts},v1=${hmacSha256Hex(decrypt(d.secret_enc, this.config.encryptionKey), `${ts}.${body}`)}`;
+    let status: number | null = null;
+    let error: string | null = null;
+    try {
+      status = (await safePost(this.agent, d.url, body, { 'vitpay-signature': signature, 'vitpay-event-id': d.event_id }, this.config.ALLOW_PRIVATE_WEBHOOK_URLS)).status;
+      if (status < 200 || status >= 300) error = `http_${status}`;
+    } catch (e) {
+      error = errorCategory(e);
+      this.logger.warn({ msg: 'webhook delivery failed', deliveryId: d.id, category: error });
+    }
+    return this.db.system(async (tx) => {
+      if (!error) {
+        await tx.query(`UPDATE webhook_deliveries SET status = 'succeeded', attempts = attempts + 1, last_status_code = $2, last_error = NULL, delivered_at = now() WHERE id = $1`, [d.id, status]);
+        await tx.query(`UPDATE webhook_endpoints SET consecutive_failures = 0 WHERE id = $1`, [d.endpoint_id]);
+        return true;
+      }
+      const attempts = d.attempts + 1;
+      await tx.query(
+        `UPDATE webhook_deliveries SET attempts = $2, last_status_code = $3, last_error = $4, status = $5,
+           next_attempt_at = now() + make_interval(secs => $6) WHERE id = $1`,
+        [d.id, attempts, status, error, attempts >= MAX_DELIVERY_ATTEMPTS ? 'failed' : 'pending', Math.min(6 * 3600, 30 * 2 ** (attempts - 1))],
+      );
+      await tx.query(
+        `UPDATE webhook_endpoints SET consecutive_failures = consecutive_failures + 1,
+           status = CASE WHEN consecutive_failures + 1 >= $2 THEN 'disabled' ELSE status END,
+           disabled_reason = CASE WHEN consecutive_failures + 1 >= $2 THEN 'too_many_failures' ELSE disabled_reason END
+         WHERE id = $1`,
+        [d.endpoint_id, AUTO_DISABLE_AFTER],
+      );
+      return false;
+    });
   }
 }

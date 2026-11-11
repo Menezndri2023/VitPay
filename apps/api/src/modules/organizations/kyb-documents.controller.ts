@@ -18,7 +18,7 @@ interface UploadedBlob {
 function sendFile(res: Response, f: { content: Buffer; filename: string; mime: string }) {
   res
     .type(f.mime)
-    .setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(f.filename)}"`)
+    .setHeader('Content-Disposition', `attachment; filename="${f.filename.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(f.filename)}`)
     .setHeader('Cache-Control', 'no-store')
     .setHeader('X-Content-Type-Options', 'nosniff')
     .send(f.content);

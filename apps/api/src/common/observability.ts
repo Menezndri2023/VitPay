@@ -14,7 +14,7 @@ export function redactPath(path: string): string {
   return path
     .split('?')[0]!
     .split('/')
-    .map((seg) => (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg) ? ':id' : /^[A-Za-z0-9_-]{16,}$/.test(seg) && /\d/.test(seg) ? ':token' : seg))
+    .map((seg) => (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg) ? ':id' : /^[A-Za-z0-9_-]{20,}$/.test(seg) || (/^[A-Za-z0-9_-]{16,}$/.test(seg) && /\d/.test(seg)) ? ':token' : seg))
     .join('/');
 }
 
