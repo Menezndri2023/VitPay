@@ -1,12 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { MERCHANT_STATE } from '../global-setup';
+import { MERCHANT_CREDS, MERCHANT_STATE } from '../global-setup';
 
 const BIZ = process.env.BIZ_URL ?? 'http://localhost:3711';
 const PAY = process.env.PAY_URL ?? 'http://localhost:3710';
 const ADMIN = process.env.ADMIN_URL ?? 'http://localhost:3712';
 const SHOTS = process.env.PW_SHOTS;
 const MAILPIT = process.env.MAILPIT_URL;
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+/** Identifiants du commerçant ouvert par global-setup (démonstration en local, inscrit en staging). */
+const merchant = () => JSON.parse(readFileSync(MERCHANT_CREDS, 'utf8')) as { email: string; password: string };
 
 /** Réutilise la session du commerçant ouverte une fois par global-setup.ts (limitation de débit). */
 async function useMerchantSession(page: import('@playwright/test').Page): Promise<void> {
@@ -52,7 +55,7 @@ test('parcours complet : inscription → vérification e-mail → prestataire �
   await expect(page.getByText('Confirmez d’abord votre adresse e-mail avec le lien reçu.')).toBeVisible();
 
   // Lien reçu par e-mail (SMTP → Mailpit)
-  const verify = await mailLink(request, email, /(http:\/\/localhost:3711\/verify-email\?token=\S+)/);
+  const verify = await mailLink(request, email, new RegExp(`(${esc(BIZ)}/verify-email\\?token=\\S+)`));
   await page.goto(verify);
   await page.getByRole('button', { name: 'Confirmer mon adresse' }).click();
   await expect(page.getByText('Adresse confirmée.')).toBeVisible();
@@ -76,7 +79,7 @@ test('parcours complet : inscription → vérification e-mail → prestataire �
   await expect(page.getByRole('img', { name: /QR code de paiement/ })).toBeVisible();
   await shot(page, '03-request-created');
   const payUrl = await page.getByLabel('Lien de paiement').inputValue();
-  expect(payUrl).toMatch(/^http:\/\/localhost:3710\/r\//);
+  expect(payUrl).toMatch(new RegExp(`^${esc(PAY)}/r/`));
 
   // Le payeur (navigateur distinct, sans session)
   const payer = await context.browser()!.newContext({ locale: 'fr-FR' });
@@ -146,6 +149,12 @@ test('caisse : saisie au pavé et QR plein écran', async ({ page }) => {
 });
 
 test('admin : page de connexion et protection de la console', async ({ page }) => {
+  // Staging : authentification HTTP devant toute la console (Caddy), avant même la page de connexion.
+  const first = await page.request.get(`${ADMIN}/console`, { maxRedirects: 0 });
+  if (first.status() === 401) {
+    expect(first.headers()['www-authenticate']).toMatch(/^Basic/);
+    return;
+  }
   await page.goto(`${ADMIN}/console`);
   await page.waitForURL(/\/login/);
   await expect(page.getByRole('heading', { name: 'Connexion administrateur' })).toBeVisible();
@@ -175,7 +184,7 @@ test('mot de passe oublié : e-mail réel (SMTP → Mailpit) puis réinitialisat
   await expect(page.getByText(/un lien de réinitialisation/)).toBeVisible();
 
   // Lecture de l'e-mail dans Mailpit (envoyé par le worker via SMTP)
-  const link = await mailLink(request, email, /(http:\/\/localhost:3711\/reset-password\?token=\S+)/);
+  const link = await mailLink(request, email, new RegExp(`(${esc(BIZ)}/reset-password\\?token=\\S+)`));
   await page.goto(link);
   await page.getByLabel('Nouveau mot de passe').fill('Brand-New-Pass-2026!');
   await page.getByLabel('Confirmation').fill('Brand-New-Pass-2026!');
@@ -213,11 +222,12 @@ test('développeurs : création d’une clé API puis appel de l’API avec cett
 });
 
 test('connexion : le paramètre next ne peut pas rediriger hors du site', async ({ page }) => {
+  const { email, password } = merchant();
   for (const next of ['/%09/evil.example', '//evil.example', '/\\evil.example', 'https://evil.example']) {
     await page.context().clearCookies();
     await page.goto(`${BIZ}/login?next=${encodeURIComponent(next)}`);
-    await page.getByLabel('E-mail').fill('marchand@vitpay.test');
-    await page.getByLabel('Mot de passe').fill('Demo-Password-2026!');
+    await page.getByLabel('E-mail').fill(email);
+    await page.getByLabel('Mot de passe').fill(password);
     await page.getByRole('button', { name: 'Se connecter' }).click();
     await page.waitForLoadState('networkidle');
     expect(new URL(page.url()).origin, next).toBe(new URL(BIZ).origin);
