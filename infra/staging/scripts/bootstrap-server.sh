@@ -20,6 +20,15 @@ if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then SRC_HOME="$(getent 
 KEYS="$SRC_HOME/.ssh/authorized_keys"
 [ -s "$KEYS" ] || { echo "aucune clé SSH dans $KEYS : refus (risque de se fermer l'accès)" >&2; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
+
+# Résolveurs DNS fiables en premier : ceux de certains hébergeurs (constaté chez Contabo)
+# expirent par intermittence et font échouer apt, git et la construction des images.
+install -d /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/10-vitpay-dns.conf <<'EOF'
+[Resolve]
+DNS=1.1.1.1 9.9.9.9 2606:4700:4700::1111 2620:fe::fe
+EOF
+systemctl restart systemd-resolved
 REPO="${VITPAY_REPO:-https://github.com/Menezndri2023/VitPay.git}"
 BRANCH="${VITPAY_BRANCH:-feat/mvp-model-a}"
 
@@ -71,9 +80,10 @@ if ! command -v docker >/dev/null; then
   apt-get update -q && apt-get -y -q install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 usermod -aG docker vitpay
-# Journaux Docker bornés (pas de croissance illimitée du disque).
+# Journaux Docker bornés (pas de croissance illimitée du disque) ; DNS explicite pour les
+# conteneurs et la construction des images (indépendant des résolveurs de l'hébergeur).
 cat > /etc/docker/daemon.json <<'EOF'
-{ "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file": "5" } }
+{ "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file": "5" }, "dns": ["1.1.1.1", "9.9.9.9"] }
 EOF
 systemctl restart docker
 
