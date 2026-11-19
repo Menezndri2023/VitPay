@@ -26,7 +26,9 @@ check "métriques protégées par jeton" '[[ $("${CURL[@]}" -o /dev/null -w "%{h
 # Limitation de débit : X-Forwarded-For forgé sans effet (11 connexions → 429).
 codes=""; for i in $(seq 1 11); do codes+="$("${CURL[@]}" -o /dev/null -w '%{http_code}' -X POST "https://app.$S/api/v1/auth/login" -H 'content-type: application/json' -H "X-Forwarded-For: 198.51.100.$i" -d '{"email":"rl@verify.invalid","password":"Wrong-Password-2026!"}') "; done
 check "limitation de débit active malgré X-Forwarded-For forgé ($codes)" '[[ "$codes" == *429* ]]'
-PUBIP="${STAGING_DOMAIN_SUFFIX%.sslip.io}"; PUBIP="${PUBIP//-/.}"
+PUBIP="${STAGING_PUBLIC_IP:-}"
+if [ -z "$PUBIP" ]; then PUBIP="${STAGING_DOMAIN_SUFFIX%.sslip.io}"; PUBIP="${PUBIP//-/.}"; fi
+check "DNS : api.$STAGING_DOMAIN_SUFFIX pointe directement vers le serveur (sans proxy)" '[[ "$PUBIP" == 127.0.0.1 ]] || getent ahostsv4 "api.$STAGING_DOMAIN_SUFFIX" | awk "{print \$1}" | grep -qx "$PUBIP"'
 check "PostgreSQL non exposé (5432 fermé côté public)" '! (timeout 3 bash -c "</dev/tcp/$PUBIP/5432") 2>/dev/null'
 check "Mailpit non exposé publiquement (8025 fermé côté public)" '! (timeout 3 bash -c "</dev/tcp/$PUBIP/8025") 2>/dev/null || [[ "$PUBIP" == 127.0.0.1 ]]'
 echo "Résultat : $ok vérifications réussies, $ko en échec."

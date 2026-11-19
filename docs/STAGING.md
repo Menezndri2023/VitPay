@@ -24,6 +24,17 @@ Réseau interne (sans Internet) : postgres · mailpit (capture SMTP) · worker �
 
 Domaine temporaire : `<ip-avec-tirets>.sslip.io` (service DNS public qui résout `203-0-113-10.sslip.io` vers `203.0.113.10`). Aucun achat de domaine.
 
+Domaine propre (en service : `staging.vitpay-ma.com`) : un enregistrement DNS `A` **`*.staging` → IP du serveur**, en **DNS uniquement (nuage gris chez Cloudflare, sans proxy)**. Avec le proxy, Cloudflare termine le TLS (Caddy ne peut plus obtenir ses certificats) et toutes les requêtes arrivent depuis des adresses Cloudflare : la limitation de débit par IP ne distinguerait plus les clients. `verify.sh` contrôle que le DNS pointe directement vers le serveur.
+
+Passage d'un domaine à l'autre, sur le serveur (sans reconstruction : aucune URL n'est figée dans les images) :
+
+```bash
+cd ~/VitPay/infra/staging
+sed -i 's/^STAGING_DOMAIN_SUFFIX=.*/STAGING_DOMAIN_SUFFIX=staging.vitpay-ma.com/' .env
+grep -q '^STAGING_PUBLIC_IP=' .env || echo 'STAGING_PUBLIC_IP=<IP>' >> .env
+docker compose up -d && scripts/verify.sh
+```
+
 ## 2. Serveur recommandé
 
 | | Minimum | Recommandé |
@@ -68,7 +79,8 @@ Docker publie ses ports en contournant `ufw` : c'est pourquoi **seul Caddy publi
 
 | Variable | Contenu |
 |---|---|
-| `STAGING_DOMAIN_SUFFIX` | `<ip-avec-tirets>.sslip.io` |
+| `STAGING_DOMAIN_SUFFIX` | `<ip-avec-tirets>.sslip.io`, ou un domaine propre (`staging.vitpay-ma.com`) : `generate-env.sh <ip> <suffixe>` |
+| `STAGING_PUBLIC_IP` | IP publique du serveur (contrôles d'exposition et de DNS de `verify.sh`) |
 | `STAGING_URL_PORT` | vide (443) ; `:18443` pour la répétition locale |
 | `PG_SUPERUSER_PASSWORD` | superutilisateur d'initialisation (création des rôles uniquement) |
 | `PG_OWNER_PASSWORD` / `PG_APP_PASSWORD` / `PG_SYSTEM_PASSWORD` | rôles `vitpay_owner` (migrations), `vitpay_app` (RLS), `vitpay_system` (BYPASSRLS) |
