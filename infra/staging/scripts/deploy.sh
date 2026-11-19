@@ -13,5 +13,7 @@ echo "4/5 Migration puis démarrage"; docker compose up -d --remove-orphans
 for _ in $(seq 1 90); do docker compose ps api | grep -q "Up" && break; sleep 2; done
 # Premier démarrage : Caddy obtient les certificats en quelques secondes ; attendre le HTTPS.
 S="$(grep '^STAGING_DOMAIN_SUFFIX=' .env | cut -d= -f2)$(grep '^STAGING_URL_PORT=' .env | cut -d= -f2)"
-for _ in $(seq 1 60); do curl -fsS --max-time 5 ${VERIFY_CURL_OPTS:-} "https://api.$S/health" >/dev/null 2>&1 && break; sleep 3; done
+for h in api pay app admin; do  # un certificat par nom : attendre chacun (tout code HTTP = TLS établi)
+  for _ in $(seq 1 60); do curl -sS -o /dev/null --max-time 5 ${VERIFY_CURL_OPTS:-} "https://$h.$S/" 2>/dev/null && break; sleep 3; done
+done
 echo "5/5 Vérifications"; scripts/verify.sh
