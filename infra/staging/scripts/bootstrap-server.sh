@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # VITPAY STAGING — sécurisation initiale d'un VPS Ubuntu 24.04 neuf (à lancer UNE fois, en root).
 # Usage :
-#   Hetzner (clé sur root)    : ssh root@<ip>   'bash -s'      < infra/staging/scripts/bootstrap-server.sh
-#   OVHcloud (clé sur ubuntu) : ssh ubuntu@<ip> 'sudo bash -s' < infra/staging/scripts/bootstrap-server.sh
+#   Clé sur root (Contabo, Hetzner)        : ssh root@<ip>   'bash -s'      < infra/staging/scripts/bootstrap-server.sh
+#   Clé sur un utilisateur sudo (« ubuntu ») : ssh ubuntu@<ip> 'sudo bash -s' < infra/staging/scripts/bootstrap-server.sh
 #
 # Effets :
 #   - utilisateur « vitpay » (sudo, clé SSH reprise de root), connexion root et mots de passe SSH désactivés ;
@@ -14,7 +14,7 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "à lancer en root" >&2; exit 1; }
 . /etc/os-release
 [ "${ID:-}" = ubuntu ] || { echo "Ubuntu attendu (24.04 LTS)" >&2; exit 1; }
-# Clé SSH de départ : celle de l'utilisateur qui lance le script via sudo (OVHcloud : « ubuntu »), sinon root.
+# Clé SSH de départ : celle de l'utilisateur qui lance le script via sudo (ex. « ubuntu »), sinon root.
 SRC_HOME="/root"
 if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then SRC_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"; fi
 KEYS="$SRC_HOME/.ssh/authorized_keys"
@@ -36,13 +36,22 @@ install -m 600 -o vitpay -g vitpay "$KEYS" /home/vitpay/.ssh/authorized_keys
 echo "vitpay ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-vitpay && chmod 440 /etc/sudoers.d/90-vitpay
 
 echo "3/6 SSH : clés uniquement, pas de connexion root"
-cat > /etc/ssh/sshd_config.d/90-vitpay.conf <<'EOF'
+# sshd retient la PREMIÈRE valeur lue : le fichier doit précéder ceux de l'image
+# (ex. 50-cloud-init.conf « PasswordAuthentication yes », fréquent chez Contabo).
+rm -f /etc/ssh/sshd_config.d/90-vitpay.conf
+cat > /etc/ssh/sshd_config.d/01-vitpay.conf <<'EOF'
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 EOF
-sshd -t && systemctl reload ssh
+sshd -t
+# Contrôle de la configuration effective, et pas seulement du fichier écrit.
+EFFECTIVE="$(sshd -T)"
+for want in "permitrootlogin no" "passwordauthentication no" "kbdinteractiveauthentication no"; do
+  grep -qx "$want" <<<"$EFFECTIVE" || { echo "SSH : « $want » non appliqué (configuration effective)" >&2; exit 1; }
+done
+systemctl reload ssh
 
 echo "4/6 Pare-feu"
 ufw default deny incoming
