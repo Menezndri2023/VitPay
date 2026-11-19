@@ -11,4 +11,7 @@ echo "2/5 Version"; git -C ../.. fetch --quiet origin && git -C ../.. checkout -
 echo "3/5 Construction des images"; docker compose build --pull
 echo "4/5 Migration puis démarrage"; docker compose up -d --remove-orphans
 for _ in $(seq 1 90); do docker compose ps api | grep -q "Up" && break; sleep 2; done
+# Premier démarrage : Caddy obtient les certificats en quelques secondes ; attendre le HTTPS.
+S="$(grep '^STAGING_DOMAIN_SUFFIX=' .env | cut -d= -f2)$(grep '^STAGING_URL_PORT=' .env | cut -d= -f2)"
+for _ in $(seq 1 60); do curl -fsS --max-time 5 ${VERIFY_CURL_OPTS:-} "https://api.$S/health" >/dev/null 2>&1 && break; sleep 3; done
 echo "5/5 Vérifications"; scripts/verify.sh
