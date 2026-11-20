@@ -10,6 +10,8 @@ echo "1/5 Sauvegarde de la base (avant toute modification)"; scripts/backup.sh
 echo "2/5 Version"; git -C ../.. fetch --quiet origin && git -C ../.. checkout --quiet --detach "$REF" && git -C ../.. log --oneline -1
 echo "3/5 Construction des images"; docker compose build --pull
 echo "4/5 Migration puis démarrage"; docker compose up -d --remove-orphans
+# Le Caddyfile est monté fichier par fichier : après un checkout, le conteneur voit encore l'ancien.
+docker compose restart caddy >/dev/null
 for _ in $(seq 1 90); do docker compose ps api | grep -q "Up" && break; sleep 2; done
 # Premier démarrage : Caddy obtient les certificats en quelques secondes ; attendre le HTTPS.
 S="$(grep '^STAGING_DOMAIN_SUFFIX=' .env | cut -d= -f2)$(grep '^STAGING_URL_PORT=' .env | cut -d= -f2)"
