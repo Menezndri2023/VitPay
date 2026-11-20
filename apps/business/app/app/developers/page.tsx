@@ -9,6 +9,7 @@ interface ApiKey {
   name: string;
   prefix: string;
   scopes: string[];
+  mode: 'test' | 'live';
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
@@ -42,6 +43,7 @@ export default function DevelopersPage() {
   const { orgApi, orgId, org } = useOrg();
   const [catalog, setCatalog] = useState<{ scopes: string[]; events: string[] } | null>(null);
   const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [liveKeysAvailable, setLiveKeysAvailable] = useState(false);
   const [hooks, setHooks] = useState<{ endpoints: Endpoint[]; recentDeliveries: Delivery[] }>({ endpoints: [], recentDeliveries: [] });
   const [secret, setSecret] = useState<{ label: string; value: string } | null>(null);
   const [msg, setMsg] = useState<{ kind: 'success' | 'danger'; text: string } | null>(null);
@@ -49,6 +51,7 @@ export default function DevelopersPage() {
   const load = useCallback(async () => {
     setCatalog(await orgApi('/developers/catalog'));
     setKeys(await orgApi('/developers/api-keys'));
+    setLiveKeysAvailable((await orgApi<{ liveKeysAvailable: boolean }>('/developers/settings')).liveKeysAvailable);
     setHooks(await orgApi('/developers/webhooks'));
   }, [orgApi]);
   useEffect(() => {
@@ -89,7 +92,7 @@ export default function DevelopersPage() {
     const fd = new FormData(e.currentTarget);
     const scopes = fd.getAll('scopes').map(String);
     void run(async () => {
-      const r = await orgApi<{ secret: string; name: string }>('/developers/api-keys', { method: 'POST', body: { name: fd.get('name'), scopes } });
+      const r = await orgApi<{ secret: string; name: string }>('/developers/api-keys', { method: 'POST', body: { name: fd.get('name'), scopes, mode: fd.get('mode') ?? 'test' } });
       setSecret({ label: `Clé « ${r.name} »`, value: r.secret });
     });
   };
@@ -128,6 +131,7 @@ export default function DevelopersPage() {
             <thead>
               <tr>
                 <th>Nom</th>
+                <th>Mode</th>
                 <th>Clé</th>
                 <th>Périmètres</th>
                 <th>Dernière utilisation</th>
@@ -138,6 +142,7 @@ export default function DevelopersPage() {
               {keys.map((k) => (
                 <tr key={k.id}>
                   <td>{k.name}</td>
+                  <td>{k.mode === 'live' ? <span className="vp-badge vp-badge-success">Réel</span> : <span className="vp-badge">Test</span>}</td>
                   <td className="vp-mono">{k.prefix}…</td>
                   <td className="vp-small">{k.scopes.map((s) => SCOPE_LABEL[s] ?? s).join(', ')}</td>
                   <td className="vp-small">{formatDate(k.lastUsedAt)}</td>
@@ -154,7 +159,7 @@ export default function DevelopersPage() {
               ))}
               {!keys.length && (
                 <tr>
-                  <td colSpan={5} className="vp-muted">
+                  <td colSpan={6} className="vp-muted">
                     Aucune clé.
                   </td>
                 </tr>
@@ -164,6 +169,18 @@ export default function DevelopersPage() {
         </div>
         <form className="vp-stack" style={{ marginTop: 12 }} onSubmit={createKey}>
           <Field label="Nom de la clé" name="name" placeholder="Site e-commerce" required minLength={2} />
+          <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend className="vp-label">Mode</legend>
+            <div className="vp-row">
+              <label className="vp-row vp-small" style={{ gap: 6 }}>
+                <input type="radio" name="mode" value="test" defaultChecked /> Test (paiements simulés, aucun débit réel)
+              </label>
+              <label className="vp-row vp-small" style={{ gap: 6 }}>
+                <input type="radio" name="mode" value="live" disabled={!liveKeysAvailable} /> Réel
+              </label>
+            </div>
+            {!liveKeysAvailable && <p className="vp-small vp-muted" style={{ margin: '4px 0 0' }}>Les clés réelles seront disponibles à l’ouverture des paiements réels.</p>}
+          </fieldset>
           <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="vp-label">Périmètres (accorder le strict nécessaire)</legend>
             <div className="vp-row">
@@ -245,7 +262,7 @@ export default function DevelopersPage() {
         )}
       </Card>
       <p className="vp-muted vp-small">
-        Documentation : <code>docs/DEVELOPERS.md</code> — authentification, idempotence, vérification des signatures.
+        Documentation : <code>docs/DEVELOPERS.md</code> — authentification, mode test et réel, idempotence, vérification des signatures.
       </p>
     </div>
   );

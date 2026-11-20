@@ -22,6 +22,35 @@ import {
   PaymentRequestStatus,
 } from './state-machines';
 
+export interface CreateRequestInput {
+  amount: string;
+  currency: string;
+  merchantReference?: string;
+  description?: string;
+  customerName?: string;
+  customerContact?: string;
+  customerEmail?: string;
+  expiresInHours?: number;
+  posId?: string;
+  successUrl?: string;
+  cancelUrl?: string;
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Adresse de retour vers le site du commerçant, complétée de l'identifiant de la demande et de son
+ * statut. Ces paramètres sont INDICATIFS : le commerçant confirme toujours par l'API ou le webhook.
+ */
+export function merchantReturnUrl(r: Pick<PaymentRequestRow, 'id' | 'reference' | 'success_url' | 'cancel_url'>, status: string): string | null {
+  const base = status === 'paid' ? r.success_url : r.cancel_url;
+  if (!base) return null;
+  const u = new URL(base);
+  u.searchParams.set('vitpay_request_id', r.id);
+  u.searchParams.set('vitpay_reference', r.reference);
+  u.searchParams.set('vitpay_status', status);
+  return u.toString();
+}
+
 export interface PaymentRequestRow {
   id: string;
   org_id: string;
@@ -35,6 +64,10 @@ export interface PaymentRequestRow {
   description: string | null;
   customer_name: string | null;
   customer_contact: string | null;
+  customer_email?: string | null;
+  success_url?: string | null;
+  cancel_url?: string | null;
+  metadata?: Record<string, string> | null;
   mode: ProviderMode;
   status: PaymentRequestStatus;
   expires_at: Date;
@@ -102,9 +135,29 @@ export class PaymentsService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  private async merchantRefOf(tx: Tx, requestId: string): Promise<string | null> {
-    const r = await tx.maybeOne<{ merchant_reference: string | null }>('SELECT merchant_reference FROM payment_requests WHERE id = $1', [requestId]);
-    return r?.merchant_reference ?? null;
+  /** Champs du commerçant recopiés dans les webhooks de paiement (rattachement à sa facture). */
+  private async merchantFieldsOf(tx: Tx, requestId: string): Promise<{ merchantReference: string | null; metadata: Record<string, string> }> {
+    const r = await tx.maybeOne<{ merchant_reference: string | null; metadata: Record<string, string> | null }>(
+      'SELECT merchant_reference, metadata FROM payment_requests WHERE id = $1',
+      [requestId],
+    );
+    return { merchantReference: r?.merchant_reference ?? null, metadata: r?.metadata ?? {} };
+  }
+
+  /** URL de retour : HTTPS obligatoire hors environnement local, sans identifiants ni fragment. */
+  private checkReturnUrl(field: string, value: string | undefined): string | null {
+    if (value === undefined || value === '') return null;
+    let u: URL;
+    try {
+      u = new URL(value);
+    } catch {
+      throw Errors.validation({ [field]: 'Must be an absolute URL' });
+    }
+    const httpAllowed = this.config.appEnv === 'local';
+    if (u.protocol !== 'https:' && !(httpAllowed && u.protocol === 'http:')) throw Errors.validation({ [field]: 'Must use HTTPS' });
+    if (u.username || u.password) throw Errors.validation({ [field]: 'Must not contain credentials' });
+    if (u.hash) throw Errors.validation({ [field]: 'Must not contain a fragment (#)' });
+    return u.toString();
   }
 
   payUrl(token: string): string {
@@ -116,7 +169,9 @@ export class PaymentsService {
   async createRequest(
     orgId: string,
     actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null },
-    input: { amount: string; currency: string; merchantReference?: string; description?: string; customerName?: string; customerContact?: string; expiresInHours?: number; posId?: string },
+    input: CreateRequestInput,
+    /** Imposé par une clé API (test → sandbox, réelle → live). */
+    forcedMode?: ProviderMode,
   ) {
     if (!isCurrency(input.currency)) throw Errors.validation({ currency: 'Unsupported currency' });
     let amount: Money;
@@ -127,9 +182,10 @@ export class PaymentsService {
     }
     if (!amount.isPositive()) throw Errors.validation({ amount: 'Amount must be positive' });
     const ttl = Math.min(input.expiresInHours ?? this.config.PAYMENT_REQUEST_DEFAULT_TTL_HOURS, MAX_TTL_HOURS);
+    const checked = { ...input, successUrl: this.checkReturnUrl('successUrl', input.successUrl), cancelUrl: this.checkReturnUrl('cancelUrl', input.cancelUrl) };
 
     try {
-      return await this.createRequestTx(orgId, actor, input, amount, ttl);
+      return await this.createRequestTx(orgId, actor, checked, amount, ttl, forcedMode);
     } catch (e) {
       // Deux créations simultanées avec la même référence : l'index unique tranche.
       if (isUniqueViolation(e, 'payment_requests_merchant_ref_uq')) {
@@ -142,9 +198,10 @@ export class PaymentsService {
   private async createRequestTx(
     orgId: string,
     actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null },
-    input: { merchantReference?: string; description?: string; customerName?: string; customerContact?: string; posId?: string },
+    input: Omit<CreateRequestInput, 'successUrl' | 'cancelUrl'> & { successUrl: string | null; cancelUrl: string | null },
     amount: Money,
     ttl: number,
+    forcedMode?: ProviderMode,
   ) {
     return this.db.forOrg(orgId, async (tx) => {
       const cur = await tx.maybeOne<{ enabled: boolean }>('SELECT enabled FROM currencies WHERE code = $1', [amount.currency]);
@@ -155,7 +212,7 @@ export class PaymentsService {
         const pos = await tx.maybeOne("SELECT 1 FROM points_of_sale WHERE id = $1 AND status = 'active'", [input.posId]);
         if (!pos) throw Errors.validation({ posId: 'Unknown point of sale' });
       }
-      const mode = await this.resolveMode(tx, amount.currency);
+      const mode = await this.resolveMode(tx, amount.currency, forcedMode);
       // [P5] Une commande = une demande : référence unique par organisation (index unique en base).
       if (input.merchantReference) {
         const dup = await tx.maybeOne<{ id: string; status: string }>('SELECT id, status FROM payment_requests WHERE lower(merchant_reference) = lower($1)', [input.merchantReference]);
@@ -163,8 +220,8 @@ export class PaymentsService {
       }
       const row = await tx.one<PaymentRequestRow>(
         `INSERT INTO payment_requests (org_id, pos_id, created_by, reference, public_token, amount_minor, currency, description,
-            customer_name, customer_contact, mode, status, expires_at, merchant_reference)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open', now() + make_interval(hours => $12), $13) RETURNING *`,
+            customer_name, customer_contact, mode, status, expires_at, merchant_reference, success_url, cancel_url, customer_email, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open', now() + make_interval(hours => $12), $13, $14, $15, $16, $17) RETURNING *`,
         [
           orgId,
           input.posId ?? null,
@@ -179,6 +236,10 @@ export class PaymentsService {
           mode,
           ttl,
           input.merchantReference ?? null,
+          input.successUrl,
+          input.cancelUrl,
+          input.customerEmail?.toLowerCase() ?? null,
+          JSON.stringify(input.metadata ?? {}),
         ],
       );
       await this.audit.record(tx, {
@@ -201,7 +262,7 @@ export class PaymentsService {
   }
 
   /** sandbox, sauf si le mode live est autorisé ET qu'un compte live actif existe. */
-  private async resolveMode(tx: Tx, currency: Currency): Promise<ProviderMode> {
+  private async resolveMode(tx: Tx, currency: Currency, forced?: ProviderMode): Promise<ProviderMode> {
     const accounts = await tx.query<ProviderAccountRow>("SELECT * FROM provider_accounts WHERE status = 'active' ORDER BY priority");
     const usable = (mode: ProviderMode) =>
       accounts.some((a) => {
@@ -212,7 +273,17 @@ export class PaymentsService {
           return false;
         }
       });
-    if (this.config.PAYMENTS_LIVE_ENABLED && this.config.appEnv === 'production' && usable('live')) return 'live';
+    const liveAllowed = this.config.PAYMENTS_LIVE_ENABLED && this.config.appEnv === 'production';
+    if (forced === 'live') {
+      if (!liveAllowed) throw Errors.invalidState('Live payments are not enabled on this environment');
+      if (usable('live')) return 'live';
+      throw Errors.invalidState('No active live payment provider account supports this currency. Connect a live provider account first.', { currency });
+    }
+    if (forced === 'sandbox') {
+      if (usable('sandbox')) return 'sandbox';
+      throw Errors.invalidState('No active sandbox payment provider account supports this currency. Connect a test provider account first.', { currency });
+    }
+    if (liveAllowed && usable('live')) return 'live';
     if (usable('sandbox')) return 'sandbox';
     throw Errors.invalidState('No active payment provider account supports this currency. Connect a provider first.', { currency });
   }
@@ -226,6 +297,10 @@ export class PaymentsService {
       description: r.description,
       customerName: r.customer_name,
       customerContact: r.customer_contact,
+      customerEmail: r.customer_email ?? null,
+      successUrl: r.success_url ?? null,
+      cancelUrl: r.cancel_url ?? null,
+      metadata: r.metadata ?? {},
       mode: r.mode,
       status: r.status,
       posId: r.pos_id,
@@ -257,7 +332,7 @@ export class PaymentsService {
     };
   }
 
-  async listRequests(orgId: string, f: { status?: PaymentRequestStatus; q?: string; before?: string; limit?: number; posId?: string; merchantReference?: string }) {
+  async listRequests(orgId: string, f: { status?: PaymentRequestStatus; q?: string; before?: string; limit?: number; posId?: string; merchantReference?: string; mode?: ProviderMode }) {
     const limit = Math.min(Math.max(f.limit ?? 25, 1), 100);
     const rows = await this.db.forOrg(orgId, (tx) =>
       tx.query<PaymentRequestRow>(
@@ -267,8 +342,9 @@ export class PaymentsService {
             AND ($3::timestamptz IS NULL OR created_at < $3)
             AND ($5::uuid IS NULL OR pos_id = $5)
             AND ($6::text IS NULL OR lower(merchant_reference) = lower($6))
+            AND ($7::text IS NULL OR mode = $7)
           ORDER BY created_at DESC LIMIT $4`,
-        [f.status ?? null, f.q ?? null, f.before ?? null, limit + 1, f.posId ?? null, f.merchantReference ?? null],
+        [f.status ?? null, f.q ?? null, f.before ?? null, limit + 1, f.posId ?? null, f.merchantReference ?? null, f.mode ?? null],
       ),
     );
     const page = rows.slice(0, limit);
@@ -276,6 +352,20 @@ export class PaymentsService {
       data: page.map((r) => this.requestView(r)),
       nextCursor: rows.length > limit ? (page[page.length - 1]?.created_at.toISOString() ?? null) : null,
     };
+  }
+
+  /**
+   * Cloisonnement test / réel des clés API : une demande d'un autre mode est « introuvable »
+   * (aucune fuite d'existence). Sans mode imposé (session Business), aucune restriction.
+   */
+  async assertModeAccess(orgId: string, mode: ProviderMode | undefined, target: { requestId?: string; attemptId?: string }): Promise<void> {
+    if (!mode) return;
+    const row = await this.db.forOrg(orgId, (tx) =>
+      target.attemptId
+        ? tx.maybeOne<{ mode: ProviderMode }>('SELECT pr.mode FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id WHERE a.id = $1', [target.attemptId])
+        : tx.maybeOne<{ mode: ProviderMode }>('SELECT mode FROM payment_requests WHERE id = $1', [target.requestId]),
+    );
+    if (!row || row.mode !== mode) throw Errors.notFound(target.attemptId ? 'Payment' : 'Payment request');
   }
 
   async getRequest(orgId: string, id: string) {
@@ -406,6 +496,7 @@ export class PaymentsService {
       paidAt: r.paid_at?.toISOString() ?? null,
       methods,
       latestAttempt: latest ? { status: latest.status, failureCode: latest.failure_code } : null,
+      returnUrl: merchantReturnUrl(r, expired ? 'expired' : r.status),
     };
   }
 
@@ -684,7 +775,7 @@ export class PaymentsService {
           aggregateType: 'payment_attempt',
           aggregateId: attempt.id,
           orgId,
-          payload: { requestId: attempt.payment_request_id, merchantReference: await this.merchantRefOf(tx, attempt.payment_request_id), amount: expected.toJSON() },
+          payload: { requestId: attempt.payment_request_id, ...(await this.merchantFieldsOf(tx, attempt.payment_request_id)), amount: expected.toJSON() },
         });
       } else if (to === 'failed' || to === 'cancelled' || to === 'expired') {
         await this.outbox.publish(tx, {
@@ -692,7 +783,7 @@ export class PaymentsService {
           aggregateType: 'payment_attempt',
           aggregateId: attempt.id,
           orgId,
-          payload: { requestId: attempt.payment_request_id, merchantReference: await this.merchantRefOf(tx, attempt.payment_request_id), status: to, failureCode: payment.failureCode ?? null },
+          payload: { requestId: attempt.payment_request_id, ...(await this.merchantFieldsOf(tx, attempt.payment_request_id)), status: to, failureCode: payment.failureCode ?? null },
         });
       }
     });

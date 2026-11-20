@@ -41,4 +41,6 @@ export interface PublicRequest {
   paidAt: string | null;
   methods: ('card' | 'bank_transfer' | 'mobile_money')[];
   latestAttempt: { status: string; failureCode: string | null } | null;
+  /** Retour vers le site du commerçant (paramètres indicatifs, le commerçant vérifie par l'API). */
+  returnUrl: string | null;
 }

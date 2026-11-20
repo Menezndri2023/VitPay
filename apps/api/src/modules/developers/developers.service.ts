@@ -4,7 +4,7 @@ import { APP_CONFIG, AppConfig } from '../../config';
 import { decrypt, encrypt, hmacSha256Hex, randomToken, sha256 } from '../../common/crypto';
 import { Errors } from '../../common/errors';
 import { createSafeAgent, errorCategory, safePost, UnsafeUrlError, validateWebhookUrl } from '../../common/safe-http';
-import { Db } from '../../database/db.service';
+import { Db, Tx } from '../../database/db.service';
 import { AuditActor, AuditService } from '../audit/audit.service';
 import { API_KEY_SCOPES } from '../identity/permissions';
 import { toCamel } from '../organizations/organizations.service';
@@ -19,6 +19,9 @@ const AUTO_DISABLE_AFTER = 50;
 const DELIVERY_CONCURRENCY = 10;
 const LEASE_SECONDS = 60;
 const KEY_PREFIX = 'vp_sk_';
+export type ApiKeyMode = 'test' | 'live';
+/** Clé de test → demandes sandbox ; clé réelle → demandes réelles. */
+export const keyModeToProviderMode = (m: ApiKeyMode): 'sandbox' | 'live' => (m === 'live' ? 'live' : 'sandbox');
 /** Durée pendant laquelle l'ancien secret signe encore, après une rotation. */
 export const ROTATION_OVERLAP_HOURS = 24;
 
@@ -37,6 +40,7 @@ export interface ResolvedApiKey {
   keyId: string;
   orgId: string;
   scopes: string[];
+  mode: ApiKeyMode;
   userId: string;
   email: string;
   fullName: string;
@@ -66,20 +70,29 @@ export class DevelopersService implements OnModuleInit {
 
   // ───────────── Clés API ─────────────
 
-  async createKey(orgId: string, actor: AuditActor & { userId: string }, input: { name: string; scopes: string[] }) {
+  /** Les clés réelles n'existent que là où les paiements réels sont autorisés (production + validation juridique). */
+  liveKeysAvailable(): boolean {
+    return this.config.PAYMENTS_LIVE_ENABLED && this.config.appEnv === 'production';
+  }
+
+  async createKey(orgId: string, actor: AuditActor & { userId: string }, input: { name: string; scopes: string[]; mode?: ApiKeyMode }) {
+    const mode: ApiKeyMode = input.mode ?? 'test';
+    if (mode === 'live' && !this.liveKeysAvailable()) {
+      throw Errors.invalidState('Live API keys are not available yet: real payments are not enabled on this environment', { mode });
+    }
     const scopes = [...new Set(input.scopes)];
     if (!scopes.length || scopes.some((s) => !(API_KEY_SCOPES as readonly string[]).includes(s))) {
       throw Errors.validation({ scopes: `Allowed: ${API_KEY_SCOPES.join(', ')}` });
     }
-    const secret = `${KEY_PREFIX}${randomToken(32)}`;
-    const prefix = secret.slice(0, KEY_PREFIX.length + 8);
+    const secret = `${KEY_PREFIX}${mode}_${randomToken(32)}`;
+    const prefix = secret.slice(0, KEY_PREFIX.length + mode.length + 1 + 8);
     return this.db.forOrg(orgId, async (tx) => {
       const k = await tx.one<Record<string, unknown>>(
-        `INSERT INTO api_keys (org_id, name, prefix, key_hash, scopes, created_by) VALUES ($1,$2,$3,$4,$5,$6)
-         RETURNING id, name, prefix, scopes, created_at`,
-        [orgId, input.name, prefix, sha256(secret), scopes, actor.userId],
+        `INSERT INTO api_keys (org_id, name, prefix, key_hash, scopes, created_by, mode) VALUES ($1,$2,$3,$4,$5,$6,$7)
+         RETURNING id, name, prefix, scopes, mode, created_at`,
+        [orgId, input.name, prefix, sha256(secret), scopes, actor.userId, mode],
       );
-      await this.audit.record(tx, { actor, orgId, action: 'developers.api_key_created', targetType: 'api_key', targetId: String(k.id), after: { name: input.name, scopes } });
+      await this.audit.record(tx, { actor, orgId, action: 'developers.api_key_created', targetType: 'api_key', targetId: String(k.id), after: { name: input.name, scopes, mode } });
       // La clé complète n'est renvoyée QU'UNE FOIS.
       return { ...toCamel(k), secret };
     });
@@ -88,7 +101,7 @@ export class DevelopersService implements OnModuleInit {
   async listKeys(orgId: string) {
     return (
       await this.db.forOrg(orgId, (tx) =>
-        tx.query<Record<string, unknown>>(`SELECT id, name, prefix, scopes, created_at, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC`),
+        tx.query<Record<string, unknown>>(`SELECT id, name, prefix, scopes, mode, created_at, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC`),
       )
     ).map(toCamel);
   }
@@ -106,11 +119,12 @@ export class DevelopersService implements OnModuleInit {
   }
 
   async resolveKey(secret: string): Promise<ResolvedApiKey | null> {
-    if (!/^vp_sk_[A-Za-z0-9_-]{40,50}$/.test(secret)) return null;
+    // Format actuel vp_sk_test_… / vp_sk_live_… ; ancien format vp_sk_… accepté (mode lu en base).
+    if (!/^vp_sk_(?:(?:test|live)_)?[A-Za-z0-9_-]{40,50}$/.test(secret)) return null;
     return this.db.system(async (tx) => {
-      const k = await tx.maybeOne<{ id: string; org_id: string; scopes: string[]; user_id: string; email: string; full_name: string }>(
+      const k = await tx.maybeOne<{ id: string; org_id: string; scopes: string[]; mode: ApiKeyMode; user_id: string; email: string; full_name: string }>(
         // La clé n'est valide que si son créateur est TOUJOURS propriétaire/administrateur de l'organisation.
-        `SELECT k.id, k.org_id, k.scopes, u.id AS user_id, u.email, u.full_name
+        `SELECT k.id, k.org_id, k.scopes, k.mode, u.id AS user_id, u.email, u.full_name
            FROM api_keys k
            JOIN users u ON u.id = k.created_by AND u.status = 'active'
            JOIN memberships m ON m.org_id = k.org_id AND m.user_id = k.created_by AND m.role IN ('owner','admin')
@@ -119,7 +133,7 @@ export class DevelopersService implements OnModuleInit {
       );
       // Mise à jour de la dernière utilisation au plus une fois par minute (pas de contention).
       if (k) await tx.query(`UPDATE api_keys SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`, [k.id]);
-      return k ? { keyId: k.id, orgId: k.org_id, scopes: k.scopes, userId: k.user_id, email: k.email, fullName: k.full_name } : null;
+      return k ? { keyId: k.id, orgId: k.org_id, scopes: k.scopes, mode: k.mode, userId: k.user_id, email: k.email, fullName: k.full_name } : null;
     });
   }
 
@@ -206,7 +220,7 @@ export class DevelopersService implements OnModuleInit {
         orgId,
         id,
         eventId,
-        JSON.stringify({ id: eventId, type: 'test', created: new Date().toISOString(), data: { message: 'Événement de test VITPAY' } }),
+        JSON.stringify({ id: eventId, type: 'test', created: new Date().toISOString(), livemode: false, data: { message: 'Événement de test VITPAY' } }),
       ]);
     });
     return { queued: true };
@@ -215,17 +229,35 @@ export class DevelopersService implements OnModuleInit {
   private async enqueue(e: OutboxEvent): Promise<void> {
     if (!e.orgId) return;
     const eventId = `evt_${e.id}`;
-    const payload = { id: eventId, type: e.eventType, created: new Date().toISOString(), data: { objectType: e.aggregateType, objectId: e.aggregateId, ...e.payload } };
-    await this.db.forOrg(e.orgId, async (tx) => {
+    const orgId = e.orgId;
+    await this.db.forOrg(orgId, async (tx) => {
+      // livemode : le commerçant distingue les événements de test des paiements réels.
+      const livemode = (await this.modeOf(tx, e.aggregateType, e.aggregateId)) === 'live';
+      const payload = { id: eventId, type: e.eventType, created: new Date().toISOString(), livemode, data: { objectType: e.aggregateType, objectId: e.aggregateId, ...e.payload } };
       const eps = await tx.query<{ id: string }>(`SELECT id FROM webhook_endpoints WHERE status = 'active' AND $1 = ANY(events)`, [e.eventType]);
       for (const ep of eps) {
         await tx.query(
           `INSERT INTO webhook_deliveries (org_id, endpoint_id, event_id, event_type, payload) VALUES ($1,$2,$3,$4,$5)
            ON CONFLICT (endpoint_id, event_id) DO NOTHING`,
-          [e.orgId, ep.id, eventId, e.eventType, JSON.stringify(payload)],
+          [orgId, ep.id, eventId, e.eventType, JSON.stringify(payload)],
         );
       }
     });
+  }
+
+  /** Mode (sandbox / live) de la demande à l'origine d'un événement. */
+  private async modeOf(tx: Tx, aggregateType: string, id: string): Promise<string | null> {
+    const sql: Record<string, string> = {
+      payment_request: 'SELECT mode FROM payment_requests WHERE id = $1',
+      payment_attempt: 'SELECT pr.mode FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id WHERE a.id = $1',
+      refund: `SELECT pr.mode FROM refunds r JOIN payment_attempts a ON a.id = r.payment_attempt_id
+                 JOIN payment_requests pr ON pr.id = a.payment_request_id WHERE r.id = $1`,
+      dispute: `SELECT pr.mode FROM disputes d JOIN payment_attempts a ON a.id = d.payment_attempt_id
+                  JOIN payment_requests pr ON pr.id = a.payment_request_id WHERE d.id = $1`,
+    };
+    const q = sql[aggregateType];
+    if (!q) return null;
+    return (await tx.maybeOne<{ mode: string }>(q, [id]))?.mode ?? null;
   }
 
   /**

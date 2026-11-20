@@ -28,6 +28,8 @@ export interface AuthContext {
   apiKeyId?: string;
   apiKeyOrgId?: string;
   apiKeyScopes?: string[];
+  /** Mode de la clé API : une clé de test ne voit que la sandbox, une clé réelle que le réel. */
+  apiKeyMode?: 'sandbox' | 'live';
 }
 
 export interface OrgContext {

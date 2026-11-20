@@ -1,0 +1,90 @@
+# VITPAY PRODUCTION — Caddy : HTTPS automatique (Let's Encrypt), seul point d'entrée public.
+{
+	email {$ACME_EMAIL}
+	{$CADDY_GLOBAL_EXTRA}
+}
+
+(common) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+	# Pas de journal d'accès Caddy : les chemins contiennent des jetons (liens de paiement, invitations).
+	# Le journal d'accès de l'API est expurgé de ces jetons (docs/SECURITY.md).
+}
+
+(upstream_headers) {
+	header_up X-Forwarded-For {remote_host}
+	header_up X-Real-IP {remote_host}
+}
+
+# Défense en profondeur : le prestataire simulé est désactivé en production (APP_ENV=production).
+(block_mock) {
+	@mock path /mock-psp /mock-psp/* /api/mock-psp/*
+	respond @mock 404
+}
+
+# Site vitrine public (domaine racine) : pages statiques, sans cookie, indexables.
+{$SITE_DOMAIN}, www.{$SITE_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		-Server
+	}
+	@www host www.{$SITE_DOMAIN}
+	redir @www https://{$SITE_DOMAIN}{uri} 301
+	@private path /_parts /_parts/*
+	respond @private 404
+	root * /srv/site
+	file_server
+}
+
+pay.{$PROD_DOMAIN} {
+	import common
+	import block_mock
+	reverse_proxy pay:3710 {
+		import upstream_headers
+	}
+}
+
+app.{$PROD_DOMAIN} {
+	import common
+	import block_mock
+	reverse_proxy business:3711 {
+		import upstream_headers
+	}
+}
+
+# Console d'administration : adresses autorisées, authentification HTTP, puis connexion VITPAY avec MFA.
+admin.{$PROD_DOMAIN} {
+	import common
+	import block_mock
+	# « handle » impose l'ordre : Caddy exécuterait sinon basic_auth AVANT respond.
+	@outside not remote_ip {$ADMIN_ALLOWED_IPS}
+	handle @outside {
+		respond 404
+	}
+	handle {
+		basic_auth {
+			{$ADMIN_BASIC_AUTH_USER} {$ADMIN_BASIC_AUTH_HASH}
+		}
+		reverse_proxy admin:3712 {
+			import upstream_headers
+		}
+	}
+}
+
+api.{$PROD_DOMAIN} {
+	import common
+	import block_mock
+	reverse_proxy api:4710 {
+		import upstream_headers
+	}
+}

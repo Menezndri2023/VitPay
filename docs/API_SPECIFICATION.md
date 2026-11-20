@@ -31,7 +31,7 @@
 | GET | `/developers/catalog` · GET/POST/DELETE `/developers/api-keys[/:id]` · GET/POST/DELETE `/developers/webhooks[/:id]` · POST `/developers/webhooks/:id/test` · POST `/developers/webhooks/:id/rotate-secret {overlapHours}` | Intégrations (`developers:manage`, session humaine uniquement) |
 | GET / POST | `/kyb/documents` (multipart `file` + `kind`), GET `/kyb/documents/:id/download` | Justificatifs KYB chiffrés, PDF/PNG/JPEG ≤ 5 Mo (`org:update`) |
 | GET / POST / DELETE | `/providers`, `/providers/:accountId` | Comptes prestataires (`providers:manage`) |
-| POST 🔑 | `/payment-requests` | `{amount:"500.00", currency, description?, customerName?, customerContact?, expiresInHours?, posId?}` |
+| POST 🔑 | `/payment-requests` | `{amount:"500.00", currency, merchantReference?, description?, customerName?, customerContact?, customerEmail?, expiresInHours?, posId?, successUrl?, cancelUrl?, metadata?}` — voir DEVELOPERS.md §2 |
 | GET | `/payment-requests?status=&q=&before=&limit=&posId=` | Pagination par curseur (`nextCursor`) |
 | GET | `/payment-requests/:id` | Détail : tentatives, remboursements, litiges, reçu, `displayStatus` |
 | GET | `/payment-requests/:id/qr.svg` | QR code |

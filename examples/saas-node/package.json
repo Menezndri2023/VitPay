@@ -1,0 +1,13 @@
+{
+  "name": "@vitpay/example-saas-node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Exemple : un logiciel (SaaS) qui encaisse ses factures avec VitPay.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@vitpay/node": "workspace:*"
+  }
+}

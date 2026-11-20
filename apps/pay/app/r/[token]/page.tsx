@@ -107,6 +107,16 @@ export default function PayPage({ params }: { params: Promise<{ token: string }>
                 {error === 'error' && <Alert kind="danger">{t('common.error')}</Alert>}
               </div>
             )}
+            {req.returnUrl && req.status !== 'paid' && (
+              <a className="vp-btn vp-btn-ghost" href={req.returnUrl} rel="noreferrer">
+                {req.payable ? t('pay.cancelAndBack') : t('pay.backToMerchant')}
+              </a>
+            )}
+            {req.returnUrl && req.status === 'paid' && (
+              <a className="vp-btn" href={req.returnUrl} rel="noreferrer">
+                {t('pay.backToMerchant')}
+              </a>
+            )}
           </section>
         )}
 

@@ -1,0 +1,21 @@
+{
+  "name": "@vitpay/node",
+  "version": "0.1.0",
+  "description": "Kit officiel VITPAY pour Node.js : demandes de paiement, remboursements et vérification des webhooks.",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=18" },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

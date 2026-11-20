@@ -8,7 +8,7 @@ import { actorOf, AuthContext, OrgContext, VitpayRequest } from '../identity/ses
 import { DevelopersService, WEBHOOK_EVENTS } from './developers.service';
 
 const UUID = z.string().uuid();
-const CreateKey = z.object({ name: z.string().trim().min(2).max(60), scopes: z.array(z.string()).min(1).max(10) });
+const CreateKey = z.object({ name: z.string().trim().min(2).max(60), scopes: z.array(z.string()).min(1).max(10), mode: z.enum(['test', 'live']).default('test') });
 const Rotate = z.object({ overlapHours: z.number().int().min(0).max(168).default(24) });
 const CreateEndpoint = z.object({ url: z.string().max(500), events: z.array(z.string()).min(1).max(20) });
 
@@ -27,6 +27,13 @@ export class DevelopersController {
   @Get('api-keys')
   keys(@Org() org: OrgContext) {
     return this.dev.listKeys(org.orgId);
+  }
+
+  /** Ce que l'espace Développeurs peut proposer (clés réelles disponibles ou non). */
+  @RequireOrgPermission('developers:manage')
+  @Get('settings')
+  settings() {
+    return { liveKeysAvailable: this.dev.liveKeysAvailable() };
   }
 
   @RequireOrgPermission('developers:manage')

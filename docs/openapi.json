@@ -1,0 +1,1109 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "API VITPAY",
+    "version": "1.0.0",
+    "description": "API publique VITPAY : demandes de paiement, remboursements et webhooks signés. Les fonds sont versés au commerçant par son propre prestataire de paiement agréé ; VITPAY ne les détient jamais.\n\nGuide : https://vitpay-ma.com/developpeurs.html",
+    "contact": {
+      "name": "VIT GLOBAL TECHNOLOGIES GROUP",
+      "email": "contact@vitpay-ma.com",
+      "url": "https://vitpay-ma.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.staging.vitpay-ma.com",
+      "description": "Staging (paiements de test uniquement)"
+    }
+  ],
+  "security": [
+    {
+      "ApiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Demandes de paiement"
+    },
+    {
+      "name": "Remboursements"
+    },
+    {
+      "name": "Reçus"
+    }
+  ],
+  "paths": {
+    "/v1/orgs/{orgId}/payment-requests": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Demandes de paiement"
+        ],
+        "operationId": "createPaymentRequest",
+        "summary": "Créer une demande de paiement",
+        "description": "Périmètre `requests:create`. Une clé de test crée une demande sandbox, une clé réelle une demande réelle. Redirigez le client vers `payUrl`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Demande créée. En-tête `Idempotent-Replayed: true` si la réponse est rejouée.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Demandes de paiement"
+        ],
+        "operationId": "listPaymentRequests",
+        "summary": "Lister les demandes",
+        "description": "Périmètre `requests:read`. Uniquement les demandes du mode de la clé. Pagination par curseur : passez `nextCursor` dans `before`.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/PaymentRequestStatus"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "description": "Recherche (référence, description, client)"
+          },
+          {
+            "name": "merchantReference",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page de résultats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentRequest"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/payment-requests/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Demandes de paiement"
+        ],
+        "operationId": "getPaymentRequest",
+        "summary": "Relire une demande",
+        "description": "Périmètre `requests:read`. `status: \"paid\"` fait foi pour livrer ou activer un service.",
+        "responses": {
+          "200": {
+            "description": "Détail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequestDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/payment-requests/{id}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Demandes de paiement"
+        ],
+        "operationId": "cancelPaymentRequest",
+        "summary": "Annuler une demande ouverte",
+        "description": "Périmètre `requests:cancel`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Demande annulée",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/payment-requests/{id}/qr.svg": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Demandes de paiement"
+        ],
+        "operationId": "getPaymentRequestQr",
+        "summary": "QR code du lien de paiement",
+        "responses": {
+          "200": {
+            "description": "Image SVG",
+            "content": {
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/refunds": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Remboursements"
+        ],
+        "operationId": "createRefund",
+        "summary": "Rembourser un paiement",
+        "description": "Périmètre `refunds:create`. Exécuté par le prestataire du commerçant ; le statut final arrive par le webhook `refund.succeeded` ou `refund.failed`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRefund"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Remboursement demandé",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refund"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/payments/{attemptId}/receipt.pdf": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "name": "attemptId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Reçus"
+        ],
+        "operationId": "getReceipt",
+        "summary": "Reçu PDF d'un paiement réussi",
+        "responses": {
+          "200": {
+            "description": "PDF",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "vp_sk_test_… / vp_sk_live_…",
+        "description": "Clé secrète créée dans Business → Développeurs. Côté serveur uniquement."
+      }
+    },
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Identifiant de l'organisation (Business → Développeurs)"
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_:.-]{8,128}$"
+        },
+        "description": "Obligatoire. Rejouer la même requête avec la même clé renvoie la même réponse, sans doublon."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Requête invalide (ex. `idempotency_key_required`)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Clé absente ou invalide",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Périmètre insuffisant ou organisation suspendue",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Introuvable, ou objet de l'autre mode (test / réel)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "État incompatible (`invalid_state`, `merchant_reference_exists`, `idempotency_in_progress`…)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "Champs invalides (`validation_error`, détail dans `details`)",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Limite de débit atteinte",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "description": "Erreur au format RFC 9457",
+        "required": [
+          "title",
+          "status",
+          "code"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string",
+            "example": "validation_error"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "À communiquer au support"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "Amount": {
+        "type": "object",
+        "required": [
+          "minor",
+          "value",
+          "currency"
+        ],
+        "properties": {
+          "minor": {
+            "type": "string",
+            "description": "Montant en unités mineures (centimes)",
+            "example": "14990"
+          },
+          "value": {
+            "type": "string",
+            "description": "Montant décimal",
+            "example": "149.90"
+          },
+          "currency": {
+            "type": "string",
+            "example": "MAD"
+          }
+        }
+      },
+      "PaymentRequestStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "paid",
+          "expired",
+          "cancelled"
+        ]
+      },
+      "CreatePaymentRequest": {
+        "type": "object",
+        "required": [
+          "amount"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "type": "string",
+            "maxLength": 24,
+            "description": "Montant décimal en chaîne, jamais un nombre flottant",
+            "example": "149.90"
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "MAD"
+            ],
+            "default": "MAD"
+          },
+          "merchantReference": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:/#-]{1,64}$",
+            "description": "Votre n° de commande ou de facture, unique dans l'organisation ; préfixe VP- réservé"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "customerName": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "customerContact": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "customerEmail": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254,
+            "description": "Jamais affiché sur la page publique"
+          },
+          "expiresInHours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 720
+          },
+          "successUrl": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "HTTPS. Retour du client après paiement confirmé, avec vitpay_request_id, vitpay_reference, vitpay_status (indicatifs)"
+          },
+          "cancelUrl": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "HTTPS. Retour du client s'il abandonne, ou si la demande expire ou est annulée"
+          },
+          "metadata": {
+            "type": "object",
+            "maxProperties": 20,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "description": "Clés 1-40 caractères [A-Za-z0-9_.-], renvoyées dans les webhooks",
+            "example": {
+              "invoiceId": "INV-2026-0042"
+            }
+          }
+        }
+      },
+      "PaymentRequest": {
+        "type": "object",
+        "required": [
+          "id",
+          "reference",
+          "amount",
+          "status",
+          "mode",
+          "payUrl",
+          "metadata",
+          "expiresAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reference": {
+            "type": "string",
+            "example": "VP-7K2M9Q"
+          },
+          "merchantReference": {
+            "type": "string",
+            "nullable": true
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "customerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "customerContact": {
+            "type": "string",
+            "nullable": true
+          },
+          "customerEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "successUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "cancelUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "sandbox",
+              "live"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentRequestStatus"
+          },
+          "posId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paidAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "cancelledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Page de paiement hébergée"
+          }
+        }
+      },
+      "PaymentAttempt": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "providerCode": {
+            "type": "string"
+          },
+          "providerRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "method": {
+            "type": "string"
+          },
+          "terminalId": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "pending",
+              "requires_action",
+              "processing",
+              "authorized",
+              "captured",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "providerFee": {
+            "$ref": "#/components/schemas/Amount",
+            "nullable": true
+          },
+          "vitpayFee": {
+            "$ref": "#/components/schemas/Amount",
+            "nullable": true
+          },
+          "vitpayFeeWaived": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "failureCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "settlementStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "settledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "succeededAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "PaymentRequestDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PaymentRequest"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "displayStatus": {
+                "type": "string",
+                "enum": [
+                  "open",
+                  "paid",
+                  "expired",
+                  "cancelled",
+                  "partially_refunded",
+                  "refunded",
+                  "disputed"
+                ]
+              },
+              "attempts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PaymentAttempt"
+                }
+              },
+              "refunds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Refund"
+                }
+              },
+              "disputes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "$ref": "#/components/schemas/Amount"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              },
+              "receipt": {
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "type": "string",
+                    "example": "VPR-2026-0000042"
+                  },
+                  "attemptId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "nullable": true
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CreateRefund": {
+        "type": "object",
+        "required": [
+          "attemptId",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tentative réussie (attempts[].id)"
+          },
+          "amount": {
+            "type": "string",
+            "maxLength": 24,
+            "description": "Partiel ; absent = total"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 200
+          }
+        }
+      },
+      "Refund": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "providerRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookEvent": {
+        "type": "object",
+        "description": "Corps des requêtes envoyées à vos endpoints. En-têtes : VitPay-Event-Id, VitPay-Signature: t=…,v1=… (HMAC-SHA256 de `${t}.${corps brut}`, plusieurs v1 pendant une rotation).",
+        "required": [
+          "id",
+          "type",
+          "created",
+          "livemode",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "evt_123"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "payment.succeeded",
+              "payment.failed",
+              "refund.succeeded",
+              "refund.failed",
+              "dispute.opened",
+              "dispute.won",
+              "dispute.lost",
+              "test"
+            ]
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "livemode": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "objectType": {
+                "type": "string",
+                "enum": [
+                  "payment_attempt",
+                  "refund",
+                  "dispute"
+                ]
+              },
+              "objectId": {
+                "type": "string"
+              },
+              "requestId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "merchantReference": {
+                "type": "string",
+                "nullable": true
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "amount": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "description": "Unités mineures"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                }
+              },
+              "status": {
+                "type": "string"
+              },
+              "failureCode": {
+                "type": "string",
+                "nullable": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
