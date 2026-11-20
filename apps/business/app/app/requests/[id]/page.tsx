@@ -171,7 +171,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
         <dl className="vp-grid" style={{ margin: 0 }}>
           {[
             ['Motif', r.description ?? '—'],
-            ['Client', r.customerName ?? '—'],
+            ['Client', [r.customerName, r.customerEmail].filter(Boolean).join(' · ') || '—'],
             ['Créée le', formatDate(r.createdAt)],
             [r.paidAt ? 'Payée le' : r.status === 'open' ? 'Expire le' : 'Validité', formatDate(r.paidAt ?? r.expiresAt)],
           ].map(([k, v]) => (

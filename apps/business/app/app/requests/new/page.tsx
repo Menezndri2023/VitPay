@@ -37,6 +37,7 @@ export default function NewRequestPage() {
           merchantReference: String(fd.get('merchantReference') || '').trim() || undefined,
           description: String(fd.get('description') || '').trim() || undefined,
           customerName: String(fd.get('customerName') || '').trim() || undefined,
+          customerEmail: String(fd.get('customerEmail') || '').trim() || undefined,
           expiresInHours: Number(fd.get('expiresInHours')) || undefined,
         },
       });
@@ -134,6 +135,7 @@ export default function NewRequestPage() {
             <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Plus d’options</summary>
             <div className="vp-form-grid" style={{ marginTop: 14 }}>
               <Field label="Nom du client (privé)" name="customerName" maxLength={120} hint="Pour vos recherches ; jamais affiché au payeur." />
+              <Field label="E-mail du client (facultatif)" name="customerEmail" type="email" maxLength={254} autoComplete="off" hint="Le reçu lui est envoyé automatiquement après le paiement." />
               <Select label="Validité du lien" name="expiresInHours" defaultValue="72">
                 {VALIDITY.map((v) => (
                   <option key={v.h} value={v.h}>

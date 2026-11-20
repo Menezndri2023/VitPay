@@ -22,13 +22,13 @@ function esc(s: string): string {
 export function layout(title: string, paragraphs: string[], cta?: { label: string; url: string }): string {
   const body = paragraphs.map((p) => `<p style="margin:0 0 14px">${esc(p)}</p>`).join('');
   const button = cta
-    ? `<p style="margin:22px 0"><a href="${esc(cta.url)}" style="background:#0b2a5b;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600">${esc(cta.label)}</a></p>`
+    ? `<p style="margin:22px 0"><a href="${esc(cta.url)}" style="background:#0e5a3a;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600">${esc(cta.label)}</a></p>`
     : '';
-  return `<!doctype html><html lang="fr"><body style="font-family:Arial,sans-serif;background:#f5f7fb;padding:24px;color:#0f1b2d">
-<div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #dde4ee;border-radius:12px;padding:24px">
-<div style="font-weight:800;font-size:20px;margin-bottom:16px">VIT<span style="color:#13b5a0">PAY</span></div>
+  return `<!doctype html><html lang="fr"><body style="font-family:Arial,sans-serif;background:#f6f8f7;padding:24px;color:#0f1a15">
+<div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e2e8e4;border-radius:12px;padding:24px">
+<div style="font-weight:800;font-size:20px;margin-bottom:16px">VIT<span style="color:#14794e">PAY</span></div>
 <h1 style="font-size:18px;margin:0 0 14px">${esc(title)}</h1>${body}${button}
-<p style="color:#5b6b82;font-size:12px;margin-top:24px">VITPAY ne vous demandera jamais votre code PIN, votre mot de passe bancaire ou un code OTP.<br>VITPAY — One platform. Every payment. · A VIT GLOBAL TECHNOLOGIES PRODUCT</p>
+<p style="color:#55645c;font-size:12px;margin-top:24px">VITPAY ne vous demandera jamais votre code PIN, votre mot de passe bancaire ou un code OTP.<br>VITPAY · un produit VIT GLOBAL TECHNOLOGIES</p>
 </div></body></html>`;
 }
 

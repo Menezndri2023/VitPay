@@ -8,6 +8,7 @@ export interface PaymentRequest {
   description: string | null;
   customerName: string | null;
   customerContact: string | null;
+  customerEmail?: string | null;
   mode: 'sandbox' | 'live';
   status: 'open' | 'paid' | 'expired' | 'cancelled';
   expiresAt: string;
