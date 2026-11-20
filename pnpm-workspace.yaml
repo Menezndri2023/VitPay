@@ -2,6 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
   - "e2e"
+  - "examples/*"
 
 allowBuilds:
   '@swc/core': true
