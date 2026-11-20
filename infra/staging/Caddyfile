@@ -28,6 +28,12 @@
 	respond @mock_tools 404
 }
 
+# Adresse nue du staging : renvoie vers l'espace commerçant.
+{$STAGING_DOMAIN_SUFFIX} {
+	import common
+	redir https://app.{$STAGING_DOMAIN_SUFFIX}{uri} 302
+}
+
 pay.{$STAGING_DOMAIN_SUFFIX} {
 	import common
 	import block_mock_tools
