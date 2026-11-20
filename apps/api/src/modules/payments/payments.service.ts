@@ -499,6 +499,7 @@ export class PaymentsService {
           amount: Money.of(request.amount_minor, request.currency),
           description: request.description ?? request.reference,
           returnUrl: `${this.config.PAY_BASE_URL}/r/${token}/status`,
+          customerIp: meta.ip ?? undefined,
         },
         `attempt:${attempt.id}`,
       );

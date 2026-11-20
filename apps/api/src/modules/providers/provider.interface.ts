@@ -49,6 +49,15 @@ export interface CreatePaymentInput {
   description: string;
   /** URL de retour navigateur (affichage uniquement, jamais une preuve de paiement). */
   returnUrl: string;
+  /** Adresse IP du payeur, exigée par certains prestataires (anti-fraude). */
+  customerIp?: string;
+}
+
+/** Champ d'identifiant que le commerçant saisit pour connecter son compte (Modèle A). */
+export interface CredentialField {
+  key: string;
+  label: string;
+  secret: boolean;
 }
 
 export interface ProviderPaymentSession {
@@ -126,6 +135,14 @@ export interface PaymentProvider {
   getDispute(account: ProviderAccountContext, providerDisputeRef: string): Promise<ProviderDispute>;
   verifyWebhook(account: ProviderAccountContext, rawBody: Buffer, headers: Record<string, string | undefined>): VerifiedProviderEvent;
   fetchSettlementReport(account: ProviderAccountContext, date: string): Promise<SettlementReport>;
+  /** Identifiants à saisir par le commerçant (absent : compte de test provisionné automatiquement). */
+  readonly credentialFields?: CredentialField[];
+  /** Format des identifiants (synchrone, avant tout appel réseau). */
+  validateCredentials?(mode: ProviderMode, credentials: Record<string, string>): void;
+  /** Vérifie les identifiants auprès du prestataire avant de les enregistrer. */
+  checkCredentials?(mode: ProviderMode, credentials: Record<string, string>): Promise<void>;
+  /** Prestataires qui signent leurs webhooks avec un identifiant du compte (ex. la clé privée). */
+  webhookSecretFromCredentials?(credentials: Record<string, string>): string;
   /** Sandbox uniquement : crée un compte de test chez le prestataire. */
   provisionSandboxAccount?(input: { orgId: string; webhookUrl: string }): Promise<{ credentials: Record<string, string>; webhookSecret: string }>;
 }

@@ -5,6 +5,7 @@ import { Errors } from '../../common/errors';
 import { Tx } from '../../database/db.service';
 import { MockProvider } from './mock.provider';
 import { PaymentProvider, ProviderAccountContext, ProviderMode } from './provider.interface';
+import { YouCanPayProvider } from './youcanpay.provider';
 
 export interface ProviderAccountRow {
   id: string;
@@ -29,8 +30,10 @@ export class ProviderRegistry {
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     mock: MockProvider,
+    youcanpay: YouCanPayProvider,
   ) {
     if (config.MOCK_PSP_ENABLED) this.providers.set(mock.code, mock);
+    this.providers.set(youcanpay.code, youcanpay);
   }
 
   get(code: string): PaymentProvider {

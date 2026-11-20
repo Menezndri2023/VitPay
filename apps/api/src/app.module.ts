@@ -39,6 +39,7 @@ import { PaymentsService } from './modules/payments/payments.service';
 import { RefundsService } from './modules/payments/refunds.service';
 import { PlatformModule } from './modules/platform/platform.module';
 import { MockProvider } from './modules/providers/mock.provider';
+import { YouCanPayProvider } from './modules/providers/youcanpay.provider';
 import { ProviderRegistry } from './modules/providers/provider-registry';
 import { ReceiptsService } from './modules/receipts/receipts.service';
 import { ReconciliationService } from './modules/reconciliation/reconciliation.service';
@@ -103,6 +104,7 @@ export class AppModule {
         AuthService,
         LedgerService,
         MockProvider,
+        YouCanPayProvider,
         ProviderRegistry,
         MockPspService,
         TerminalsService,

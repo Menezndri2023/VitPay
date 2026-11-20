@@ -126,11 +126,18 @@ export class OrganizationsService {
     const rows = await this.db.forOrg(orgId, (tx) =>
       tx.query(`SELECT id, provider_code, mode, label, priority, status, created_at FROM provider_accounts ORDER BY priority, created_at`),
     );
-    return rows.map(toCamel);
+    // URL de notification à déclarer chez le prestataire (non secrète : chaque appel est vérifié par signature).
+    return rows.map((r) => ({ ...toCamel(r), webhookUrl: this.providers.webhookUrl(String(r.provider_code), String(r.id)) }));
   }
 
   availableProviders() {
-    return this.providers.list().map((p) => ({ code: p.code, displayName: p.displayName, modes: p.supportedModes, capabilities: p.capabilities() }));
+    return this.providers.list().map((p) => ({
+      code: p.code,
+      displayName: p.displayName,
+      modes: p.supportedModes,
+      capabilities: p.capabilities(),
+      credentialFields: p.credentialFields ?? null,
+    }));
   }
 
   /**
@@ -156,6 +163,13 @@ export class OrganizationsService {
     const accountId = (await this.db.forOrg(orgId, (tx) => tx.one<{ id: string }>('SELECT gen_random_uuid() AS id'))).id;
     let credentials = input.credentials;
     let webhookSecret = input.webhookSecret;
+    if (credentials && provider.validateCredentials) {
+      // Ne garder que les champs attendus (aucune donnée inattendue chiffrée et stockée).
+      if (provider.credentialFields) credentials = Object.fromEntries(provider.credentialFields.map((f) => [f.key, (credentials as Record<string, string>)[f.key]?.trim() ?? '']));
+      provider.validateCredentials(input.mode, credentials);
+      if (provider.checkCredentials) await provider.checkCredentials(input.mode, credentials);
+    }
+    if (credentials && !webhookSecret && provider.webhookSecretFromCredentials) webhookSecret = provider.webhookSecretFromCredentials(credentials);
     if (!credentials || !webhookSecret) {
       if (input.mode !== 'sandbox' || !provider.provisionSandboxAccount) {
         throw Errors.validation({ credentials: 'Provider credentials and webhook secret are required' });

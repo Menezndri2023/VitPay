@@ -17,8 +17,8 @@ interface OrgInfo {
   myPermissions: string[];
 }
 interface Providers {
-  available: { code: string; displayName: string; modes: string[] }[];
-  connected: { id: string; providerCode: string; mode: string; label: string; status: string }[];
+  available: { code: string; displayName: string; modes: string[]; credentialFields: { key: string; label: string; secret: boolean }[] | null }[];
+  connected: { id: string; providerCode: string; mode: string; label: string; status: string; webhookUrl: string }[];
 }
 interface Member {
   userId: string;
@@ -81,6 +81,11 @@ export default function SettingsPage() {
           <div key={c.id} className="vp-row vp-between" style={{ padding: '8px 0', borderBottom: '1px solid var(--vp-border)' }}>
             <span>
               {c.label} <span className="vp-badge vp-badge-neutral">{c.mode}</span>
+              {c.status === 'active' && providers.available.find((p) => p.code === c.providerCode)?.credentialFields && (
+                <span className="vp-muted vp-small" style={{ display: 'block', wordBreak: 'break-all' }}>
+                  URL de webhook à déclarer chez le prestataire : <code>{c.webhookUrl}</code>
+                </span>
+              )}
             </span>
             <span className="vp-row">
               <StatusBadge status={c.status} />
@@ -95,13 +100,42 @@ export default function SettingsPage() {
         {can('providers:manage') &&
           providers.available
             .filter((p) => !providers.connected.some((c) => c.providerCode === p.code && c.status === 'active'))
-            .map((p) => (
-              <div key={p.code} className="vp-row" style={{ marginTop: 12 }}>
-                <Button variant="accent" onClick={() => run(() => orgApi('/providers', { method: 'POST', body: { providerCode: p.code, mode: 'sandbox' } }), `${p.displayName} connecté.`)}>
-                  Connecter : {p.displayName}
-                </Button>
-              </div>
-            ))}
+            .map((p) =>
+              p.credentialFields ? (
+                // Modèle A : le commerçant saisit les clés de SON compte (mode test tant que le réel est verrouillé).
+                <form
+                  key={p.code}
+                  className="vp-stack"
+                  style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--vp-border)' }}
+                  autoComplete="off"
+                  onSubmit={(e) => {
+                    const credentials = form(e);
+                    const el = e.currentTarget;
+                    void run(async () => {
+                      await orgApi('/providers', { method: 'POST', body: { providerCode: p.code, mode: 'sandbox', credentials } });
+                      el.reset();
+                    }, `${p.displayName} (mode test) connecté. Pensez à désactiver le prestataire simulé pour utiliser ce compte.`);
+                  }}
+                >
+                  <strong>{p.displayName} — mode test</strong>
+                  <span className="vp-muted vp-small">Clés « sandbox » de votre compte, dans ses paramètres développeur. Elles sont vérifiées auprès du prestataire puis stockées chiffrées.</span>
+                  {p.credentialFields.map((f) => (
+                    <Field key={f.key} label={f.label} name={f.key} type={f.secret ? 'password' : 'text'} required spellCheck={false} />
+                  ))}
+                  <div>
+                    <Button variant="accent" type="submit">
+                      Connecter : {p.displayName}
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <div key={p.code} className="vp-row" style={{ marginTop: 12 }}>
+                  <Button variant="accent" onClick={() => run(() => orgApi('/providers', { method: 'POST', body: { providerCode: p.code, mode: 'sandbox' } }), `${p.displayName} connecté.`)}>
+                    Connecter : {p.displayName}
+                  </Button>
+                </div>
+              ),
+            )}
         <p className="vp-muted vp-small">
           Mode réel (live) : désactivé tant que la validation juridique et réglementaire de VITPAY n’est pas finalisée et que votre KYB n’est pas vérifié.
         </p>
