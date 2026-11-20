@@ -28,6 +28,25 @@
 	respond @mock_tools 404
 }
 
+# Site vitrine public (domaine racine) : pages statiques, sans cookie, indexables.
+# SITE_DOMAIN vide : vitrine.localhost (docker-compose.yml), aucun certificat public demandé.
+{$SITE_DOMAIN}, www.{$SITE_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		-Server
+	}
+	@www host www.{$SITE_DOMAIN}
+	redir @www https://{$SITE_DOMAIN}{uri} 301
+	@private path /_parts /_parts/*
+	respond @private 404
+	root * /srv/site
+	file_server
+}
+
 # Adresse nue du staging : renvoie vers l'espace commerçant.
 {$STAGING_DOMAIN_SUFFIX} {
 	import common

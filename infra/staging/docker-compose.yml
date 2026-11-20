@@ -144,8 +144,10 @@ services:
       ADMIN_BASIC_AUTH_USER: ${ADMIN_BASIC_AUTH_USER}
       ADMIN_BASIC_AUTH_HASH: ${ADMIN_BASIC_AUTH_HASH}
       CADDY_GLOBAL_EXTRA: ${CADDY_GLOBAL_EXTRA:-}
+      SITE_DOMAIN: ${SITE_DOMAIN:-vitrine.localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../site:/srv/site:ro
       - caddy_data:/data
       - caddy_config:/config
     networks: { edge: { ipv4_address: 172.30.10.10 } }
