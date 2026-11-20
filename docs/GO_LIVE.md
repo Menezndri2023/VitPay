@@ -2,7 +2,7 @@
 
 > Objectif : que VitPay soit **installé, testé et prêt** en production, pour qu'il ne reste qu'à
 > brancher les clés du prestataire et à poser la référence juridique le jour où les accords arrivent.
-> Mis à jour le 20/11/2026. Statuts : ☑ fait · ◐ en cours · ☐ à faire · ⛔ dépend d'un tiers.
+> Mis à jour le 20/11/2026. Manuel d'installation : [`PRODUCTION.md`](PRODUCTION.md). Statuts : ☑ fait · ◐ en cours · ☐ à faire · ⛔ dépend d'un tiers.
 
 ## Ce qui est prêt
 
@@ -21,13 +21,13 @@ Réalisable maintenant. La pile est rodée localement, puis installée le jour o
 
 | # | Travail | État |
 |---|---|---|
-| P1 | Pile `infra/production` : `APP_ENV=production`, sans prestataire simulé ni Mailpit, Caddy HTTPS, domaine configurable | ☐ |
-| P2 | Script de génération de configuration de production (secrets aléatoires, jamais versionnés) | ☐ |
-| P3 | Création du premier administrateur en production (commande dédiée, MFA obligatoire ; le seed y est interdit) | ☐ |
-| P4 | Sauvegardes chiffrées **hors serveur**, et restauration testée (PRA, ligne F3) | ☐ |
+| P1 | Pile `infra/production` : `APP_ENV=production`, sans prestataire simulé ni Mailpit, Caddy HTTPS, domaine configurable, console admin limitée par adresse IP | ☑ |
+| P2 | Script de génération de configuration de production (secrets aléatoires, jamais versionnés) | ☑ |
+| P3 | Création des administrateurs en production (`create-admin`, terminal interactif, MFA obligatoire, compte existant jamais modifié) | ☑ |
+| P4 | Sauvegardes chiffrées (age, clé privée hors ligne) copiées **hors serveur** (rclone), restauration testée dans une base jetable | ☑ (destination hors serveur à choisir avec l'hébergeur) |
 | P5 | Surveillance : disponibilité, erreurs et alertes vers le fondateur | ☐ |
 | P6 | Pré-vol « go-live » : script qui vérifie tout avant d'ouvrir le réel (configuration, KYB, compte prestataire live, webhooks, sauvegarde récente) | ☐ |
-| P7 | Répétition complète en local de la pile de production (comme pour le staging) | ☐ |
+| P7 | Répétition complète en local de la pile de production | ☑ 18/19 vérifications (reste : SMTP, voir L3) |
 | P8 | Fusion de la branche `feat/api-checkout-saas` et étiquette de version | ☐ |
 
 ## Phase 2 — Prestataire n°1 (YouCan Pay)

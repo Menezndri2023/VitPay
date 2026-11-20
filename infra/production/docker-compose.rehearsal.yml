@@ -1,0 +1,6 @@
+# Répétition générale LOCALE de la production : certificats de l'autorité locale de Caddy,
+# ports non privilégiés, aucun conflit avec les piles sandbox et staging.
+#   docker compose -f docker-compose.yml -f docker-compose.rehearsal.yml up -d --build
+services:
+  caddy:
+    ports: !override ["28080:80", "28443:443"]
