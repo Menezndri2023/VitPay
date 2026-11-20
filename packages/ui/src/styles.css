@@ -43,7 +43,7 @@
   --vp-radius-sm: 8px;
   --vp-shadow: 0 1px 2px rgba(11, 61, 46, 0.05);
   --vp-shadow-lift: 0 12px 32px -12px rgba(11, 61, 46, 0.22);
-  --vp-font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif;
+  --vp-font: var(--vp-font-latin, "Inter"), system-ui, -apple-system, "Segoe UI", Roboto, var(--vp-font-arabic, "Noto Sans Arabic"), sans-serif;
   --vp-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   color-scheme: light;
 }
