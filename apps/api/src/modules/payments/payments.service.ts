@@ -170,6 +170,8 @@ export class PaymentsService {
     orgId: string,
     actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null },
     input: CreateRequestInput,
+    /** Imposé par une clé API (test → sandbox, réelle → live). */
+    forcedMode?: ProviderMode,
   ) {
     if (!isCurrency(input.currency)) throw Errors.validation({ currency: 'Unsupported currency' });
     let amount: Money;
@@ -183,7 +185,7 @@ export class PaymentsService {
     const checked = { ...input, successUrl: this.checkReturnUrl('successUrl', input.successUrl), cancelUrl: this.checkReturnUrl('cancelUrl', input.cancelUrl) };
 
     try {
-      return await this.createRequestTx(orgId, actor, checked, amount, ttl);
+      return await this.createRequestTx(orgId, actor, checked, amount, ttl, forcedMode);
     } catch (e) {
       // Deux créations simultanées avec la même référence : l'index unique tranche.
       if (isUniqueViolation(e, 'payment_requests_merchant_ref_uq')) {
@@ -199,6 +201,7 @@ export class PaymentsService {
     input: Omit<CreateRequestInput, 'successUrl' | 'cancelUrl'> & { successUrl: string | null; cancelUrl: string | null },
     amount: Money,
     ttl: number,
+    forcedMode?: ProviderMode,
   ) {
     return this.db.forOrg(orgId, async (tx) => {
       const cur = await tx.maybeOne<{ enabled: boolean }>('SELECT enabled FROM currencies WHERE code = $1', [amount.currency]);
@@ -209,7 +212,7 @@ export class PaymentsService {
         const pos = await tx.maybeOne("SELECT 1 FROM points_of_sale WHERE id = $1 AND status = 'active'", [input.posId]);
         if (!pos) throw Errors.validation({ posId: 'Unknown point of sale' });
       }
-      const mode = await this.resolveMode(tx, amount.currency);
+      const mode = await this.resolveMode(tx, amount.currency, forcedMode);
       // [P5] Une commande = une demande : référence unique par organisation (index unique en base).
       if (input.merchantReference) {
         const dup = await tx.maybeOne<{ id: string; status: string }>('SELECT id, status FROM payment_requests WHERE lower(merchant_reference) = lower($1)', [input.merchantReference]);
@@ -259,7 +262,7 @@ export class PaymentsService {
   }
 
   /** sandbox, sauf si le mode live est autorisé ET qu'un compte live actif existe. */
-  private async resolveMode(tx: Tx, currency: Currency): Promise<ProviderMode> {
+  private async resolveMode(tx: Tx, currency: Currency, forced?: ProviderMode): Promise<ProviderMode> {
     const accounts = await tx.query<ProviderAccountRow>("SELECT * FROM provider_accounts WHERE status = 'active' ORDER BY priority");
     const usable = (mode: ProviderMode) =>
       accounts.some((a) => {
@@ -270,7 +273,17 @@ export class PaymentsService {
           return false;
         }
       });
-    if (this.config.PAYMENTS_LIVE_ENABLED && this.config.appEnv === 'production' && usable('live')) return 'live';
+    const liveAllowed = this.config.PAYMENTS_LIVE_ENABLED && this.config.appEnv === 'production';
+    if (forced === 'live') {
+      if (!liveAllowed) throw Errors.invalidState('Live payments are not enabled on this environment');
+      if (usable('live')) return 'live';
+      throw Errors.invalidState('No active live payment provider account supports this currency. Connect a live provider account first.', { currency });
+    }
+    if (forced === 'sandbox') {
+      if (usable('sandbox')) return 'sandbox';
+      throw Errors.invalidState('No active sandbox payment provider account supports this currency. Connect a test provider account first.', { currency });
+    }
+    if (liveAllowed && usable('live')) return 'live';
     if (usable('sandbox')) return 'sandbox';
     throw Errors.invalidState('No active payment provider account supports this currency. Connect a provider first.', { currency });
   }
@@ -319,7 +332,7 @@ export class PaymentsService {
     };
   }
 
-  async listRequests(orgId: string, f: { status?: PaymentRequestStatus; q?: string; before?: string; limit?: number; posId?: string; merchantReference?: string }) {
+  async listRequests(orgId: string, f: { status?: PaymentRequestStatus; q?: string; before?: string; limit?: number; posId?: string; merchantReference?: string; mode?: ProviderMode }) {
     const limit = Math.min(Math.max(f.limit ?? 25, 1), 100);
     const rows = await this.db.forOrg(orgId, (tx) =>
       tx.query<PaymentRequestRow>(
@@ -329,8 +342,9 @@ export class PaymentsService {
             AND ($3::timestamptz IS NULL OR created_at < $3)
             AND ($5::uuid IS NULL OR pos_id = $5)
             AND ($6::text IS NULL OR lower(merchant_reference) = lower($6))
+            AND ($7::text IS NULL OR mode = $7)
           ORDER BY created_at DESC LIMIT $4`,
-        [f.status ?? null, f.q ?? null, f.before ?? null, limit + 1, f.posId ?? null, f.merchantReference ?? null],
+        [f.status ?? null, f.q ?? null, f.before ?? null, limit + 1, f.posId ?? null, f.merchantReference ?? null, f.mode ?? null],
       ),
     );
     const page = rows.slice(0, limit);
@@ -338,6 +352,20 @@ export class PaymentsService {
       data: page.map((r) => this.requestView(r)),
       nextCursor: rows.length > limit ? (page[page.length - 1]?.created_at.toISOString() ?? null) : null,
     };
+  }
+
+  /**
+   * Cloisonnement test / réel des clés API : une demande d'un autre mode est « introuvable »
+   * (aucune fuite d'existence). Sans mode imposé (session Business), aucune restriction.
+   */
+  async assertModeAccess(orgId: string, mode: ProviderMode | undefined, target: { requestId?: string; attemptId?: string }): Promise<void> {
+    if (!mode) return;
+    const row = await this.db.forOrg(orgId, (tx) =>
+      target.attemptId
+        ? tx.maybeOne<{ mode: ProviderMode }>('SELECT pr.mode FROM payment_attempts a JOIN payment_requests pr ON pr.id = a.payment_request_id WHERE a.id = $1', [target.attemptId])
+        : tx.maybeOne<{ mode: ProviderMode }>('SELECT mode FROM payment_requests WHERE id = $1', [target.requestId]),
+    );
+    if (!row || row.mode !== mode) throw Errors.notFound(target.attemptId ? 'Payment' : 'Payment request');
   }
 
   async getRequest(orgId: string, id: string) {

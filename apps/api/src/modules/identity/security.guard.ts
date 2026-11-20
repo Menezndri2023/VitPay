@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { APP_CONFIG, AppConfig } from '../../config';
 import { AppError, Errors } from '../../common/errors';
 import { Db } from '../../database/db.service';
-import { DevelopersService } from '../developers/developers.service';
+import { DevelopersService, keyModeToProviderMode } from '../developers/developers.service';
 import { AuthService } from './auth.service';
 import {
   META_ADMIN_PERMISSION,
@@ -133,6 +133,7 @@ export class SecurityGuard implements CanActivate {
       apiKeyId: key.keyId,
       apiKeyOrgId: key.orgId,
       apiKeyScopes: key.scopes,
+      apiKeyMode: keyModeToProviderMode(key.mode),
     };
     req.org = { orgId, role: 'cashier' };
     return true;

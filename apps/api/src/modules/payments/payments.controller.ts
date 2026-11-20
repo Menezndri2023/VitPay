@@ -81,9 +81,10 @@ export class PaymentsController {
     @Req() req: VitpayRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const r = await this.idempotency.run(`payment_request:${org.orgId}`, key, body, async () => ({
+    // Clés de test et réelles : espaces d'idempotence séparés (la même clé ne rejoue pas l'autre mode).
+    const r = await this.idempotency.run(`payment_request:${org.orgId}${a.apiKeyMode ? `:${a.apiKeyMode}` : ''}`, key, body, async () => ({
       status: 201,
-      body: await this.payments.createRequest(org.orgId, actorOf(a, req), body),
+      body: await this.payments.createRequest(org.orgId, actorOf(a, req), body, a.apiKeyMode),
     }));
     res.status(r.status);
     if (r.replayed) res.setHeader('Idempotent-Replayed', 'true');
@@ -92,26 +93,29 @@ export class PaymentsController {
 
   @RequireOrgPermission('requests:read')
   @Get('payment-requests')
-  list(@Org() org: OrgContext, @Query(new ZodPipe(ListQuery)) q: z.infer<typeof ListQuery>) {
-    return this.payments.listRequests(org.orgId, q);
+  list(@Org() org: OrgContext, @Auth() a: AuthContext, @Query(new ZodPipe(ListQuery)) q: z.infer<typeof ListQuery>) {
+    return this.payments.listRequests(org.orgId, { ...q, mode: a.apiKeyMode });
   }
 
   @RequireOrgPermission('requests:read')
   @Get('payment-requests/:id')
-  get(@Org() org: OrgContext, @Param('id', new ZodPipe(UUID)) id: string) {
+  async get(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('id', new ZodPipe(UUID)) id: string) {
+    await this.payments.assertModeAccess(org.orgId, a.apiKeyMode, { requestId: id });
     return this.payments.getRequest(org.orgId, id);
   }
 
   /** Historique des événements de la transaction (journal d'audit chaîné, sans données techniques sensibles). */
   @RequireOrgPermission('requests:read')
   @Get('payment-requests/:id/events')
-  events(@Org() org: OrgContext, @Param('id', new ZodPipe(UUID)) id: string) {
+  async events(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('id', new ZodPipe(UUID)) id: string) {
+    await this.payments.assertModeAccess(org.orgId, a.apiKeyMode, { requestId: id });
     return this.payments.getRequestEvents(org.orgId, id);
   }
 
   @RequireOrgPermission('requests:read')
   @Get('payment-requests/:id/qr.svg')
-  async qr(@Org() org: OrgContext, @Param('id', new ZodPipe(UUID)) id: string, @Res() res: Response) {
+  async qr(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('id', new ZodPipe(UUID)) id: string, @Res() res: Response) {
+    await this.payments.assertModeAccess(org.orgId, a.apiKeyMode, { requestId: id });
     const r = await this.payments.getRequest(org.orgId, id);
     const svg = await QRCode.toString(r.payUrl, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#0B1F44', light: '#FFFFFF' } });
     res.type('image/svg+xml').setHeader('Cache-Control', 'private, max-age=300').send(svg);
@@ -120,7 +124,8 @@ export class PaymentsController {
   @RequireOrgPermission('requests:cancel')
   @HttpCode(200)
   @Post('payment-requests/:id/cancel')
-  cancel(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('id', new ZodPipe(UUID)) id: string, @Body(new ZodPipe(Cancel)) body: z.infer<typeof Cancel>, @Req() req: VitpayRequest) {
+  async cancel(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('id', new ZodPipe(UUID)) id: string, @Body(new ZodPipe(Cancel)) body: z.infer<typeof Cancel>, @Req() req: VitpayRequest) {
+    await this.payments.assertModeAccess(org.orgId, a.apiKeyMode, { requestId: id });
     return this.payments.cancelRequest(org.orgId, id, actorOf(a, req), body.reason);
   }
 
@@ -134,7 +139,8 @@ export class PaymentsController {
     @Req() req: VitpayRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const r = await this.idempotency.run(`refund:${org.orgId}`, key, body, async () => ({
+    await this.payments.assertModeAccess(org.orgId, a.apiKeyMode, { attemptId: body.attemptId });
+    const r = await this.idempotency.run(`refund:${org.orgId}${a.apiKeyMode ? `:${a.apiKeyMode}` : ''}`, key, body, async () => ({
       status: 201,
       body: await this.refunds.create(org.orgId, actorOf(a, req), body),
     }));
@@ -144,7 +150,8 @@ export class PaymentsController {
 
   @RequireOrgPermission('requests:read')
   @Get('payments/:attemptId/receipt.pdf')
-  async receipt(@Org() org: OrgContext, @Param('attemptId', new ZodPipe(UUID)) attemptId: string, @Res() res: Response) {
+  async receipt(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('attemptId', new ZodPipe(UUID)) attemptId: string, @Res() res: Response) {
+    await this.payments.assertModeAccess(org.orgId, a.apiKeyMode, { attemptId });
     const pdf = await this.receipts.forOrg(org.orgId, attemptId);
     res.type('application/pdf').setHeader('Content-Disposition', `inline; filename="recu-${attemptId}.pdf"`).send(pdf);
   }
@@ -157,7 +164,9 @@ export class PaymentsController {
 
   @RequireOrgPermission('requests:read')
   @Get('dashboard')
-  async dashboard(@Org() org: OrgContext) {
+  async dashboard(@Org() org: OrgContext, @Auth() a: AuthContext) {
+    // Agrégats tous modes confondus : réservé à l'espace Business (pas aux clés API cloisonnées).
+    if (a.apiKeyId) throw Errors.forbidden('The dashboard is not available to API keys');
     return this.db.forOrg(org.orgId, async (tx) => {
       const totals = await tx.query<{ currency: 'MAD'; status: string; count: string; sum: string }>(
         `SELECT currency, status, count(*)::text AS count, COALESCE(sum(amount_minor),0)::text AS sum

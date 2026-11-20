@@ -6,11 +6,24 @@ Intégrez VITPAY à votre site ou à votre logiciel : créez des demandes de pai
 
 ## 1. Authentification
 
-Dans **Business → Développeurs**, un propriétaire ou un administrateur crée une clé API (`vp_sk_…`). Elle n'est **affichée qu'une seule fois** et VITPAY n'en conserve que l'empreinte.
+Dans **Business → Développeurs**, un propriétaire ou un administrateur crée une clé API. Elle n'est **affichée qu'une seule fois** et VITPAY n'en conserve que l'empreinte.
 
 ```
-Authorization: Bearer vp_sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Authorization: Bearer vp_sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+### Mode test et mode réel
+
+| Clé | Demandes créées | Ce que la clé peut lire |
+|---|---|---|
+| `vp_sk_test_…` | En **sandbox** : paiements de test, aucun débit réel (cartes de test du prestataire) | Uniquement les demandes de test |
+| `vp_sk_live_…` | **Réelles**, sur votre compte prestataire réel | Uniquement les demandes réelles |
+
+- Développez et testez avec la clé de test, puis remplacez-la par la clé réelle : **le code ne change pas**.
+- Une demande de l'autre mode répond `404` : une clé de test ne peut ni lire, ni annuler, ni rembourser un paiement réel.
+- Les clés réelles ne sont proposées qu'à l'ouverture des paiements réels. Avant, leur création répond `409`.
+- Les clés créées avant le 21/11/2026 (`vp_sk_…` sans mode) restent valides et sont des clés de test.
+- `Idempotency-Key` : les espaces de test et réel sont séparés.
 
 Règles d'utilisation :
 
@@ -80,7 +93,7 @@ Content-Type: application/json
 VitPay-Event-Id: evt_123
 VitPay-Signature: t=1731250000,v1=5f2b…
 
-{"id":"evt_123","type":"payment.succeeded","created":"2026-11-10T16:42:00.000Z",
+{"id":"evt_123","type":"payment.succeeded","created":"2026-11-10T16:42:00.000Z","livemode":false,
  "data":{"objectType":"payment_attempt","objectId":"…","requestId":"…","merchantReference":"INV-2026-0042",
          "metadata":{"invoiceId":"INV-2026-0042","customerId":"cus_81"},"amount":{"amount":"14990","currency":"MAD"}}}
 ```
@@ -120,6 +133,7 @@ Bonnes pratiques :
 - Répondez `2xx` rapidement, puis traitez de façon asynchrone.
 - La livraison est **au moins une fois** : dédupliquez sur `VitPay-Event-Id`.
 - En cas d'échec (réponse autre que `2xx` ou délai dépassé), VITPAY réessaie avec un délai croissant, jusqu'à 10 tentatives. Les redirections ne sont pas suivies.
+- Le champ `livemode` (`true` / `false`) indique si l'événement concerne un paiement réel. **Ignorez les événements `livemode: false` dans votre environnement de production.**
 - Pour une décision critique (expédier une commande), vous pouvez relire la demande via `GET …/payment-requests/:id` : `status: "paid"`.
 - Le bouton **Tester** envoie un événement `test`.
 
