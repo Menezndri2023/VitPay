@@ -25,7 +25,7 @@ export default function AdminDashboard() {
   const todo = [
     critical > 0 && { kind: 'danger' as const, text: `${critical} incident${critical > 1 ? 's' : ''} critique${critical > 1 ? 's' : ''} ouvert${critical > 1 ? 's' : ''}`, href: '/console/incidents', action: 'Traiter' },
     d.pendingApprovals > 0 && { kind: 'warning' as const, text: `${d.pendingApprovals} validation${d.pendingApprovals > 1 ? 's' : ''} en attente d’un second administrateur`, href: '/console/approvals', action: 'Examiner' },
-    kybToReview > 0 && { kind: 'info' as const, text: `${kybToReview} dossier${kybToReview > 1 ? 's' : ''} KYB à examiner`, href: '/console/organizations', action: 'Ouvrir' },
+    kybToReview > 0 && { kind: 'info' as const, text: `${kybToReview} dossier${kybToReview > 1 ? 's' : ''} KYB à examiner`, href: '/console/organizations?status=submitted', action: 'Ouvrir' },
   ].filter(Boolean) as { kind: 'danger' | 'warning' | 'info'; text: string; href: string; action: string }[];
 
   return (

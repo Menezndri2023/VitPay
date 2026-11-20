@@ -32,8 +32,14 @@ export class AdminController {
 
   @RequireAdminPermission('orgs:read')
   @Get('organizations')
-  orgs(@Auth() a: AuthContext, @Query('q', new ZodPipe(Opt)) q?: string, @Query('status', new ZodPipe(Opt)) status?: string) {
-    return this.admin.listOrgs(a, q, status);
+  orgs(
+    @Auth() a: AuthContext,
+    @Query('q', new ZodPipe(Opt)) q?: string,
+    @Query('status', new ZodPipe(Opt)) status?: string,
+    @Query('activity', new ZodPipe(z.enum(['live', 'test']).optional())) activity?: string,
+    @Query('before', new ZodPipe(z.iso.datetime({ offset: true }).optional())) before?: string,
+  ) {
+    return this.admin.listOrgs(a, q, status, activity, before);
   }
 
   @RequireAdminPermission('orgs:read')
