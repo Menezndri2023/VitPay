@@ -25,10 +25,10 @@ Réalisable maintenant. La pile est rodée localement, puis installée le jour o
 | P2 | Script de génération de configuration de production (secrets aléatoires, jamais versionnés) | ☑ |
 | P3 | Création des administrateurs en production (`create-admin`, terminal interactif, MFA obligatoire, compte existant jamais modifié) | ☑ |
 | P4 | Sauvegardes chiffrées (age, clé privée hors ligne) copiées **hors serveur** (rclone), restauration testée dans une base jetable | ☑ (destination hors serveur à choisir avec l'hébergeur) |
-| P5 | Surveillance : `monitor.sh` (API, conteneurs, incidents, files, erreurs, disque, sauvegarde, certificat), alertes ntfy ou Telegram aux changements d'état, plus une sonde externe | ☑ (canal d'alerte à choisir) |
+| P5 | Surveillance : `monitor.sh` (API, conteneurs, incidents, files, erreurs, disque, sauvegarde, certificat), alertes ntfy ou Telegram aux changements d'état, plus une sonde externe | ☑ canal ntfy configuré et testé (20/11/2026) ; sonde externe UptimeRobot active sur le staging et le site (ajouter `api.vitpay-ma.com/health` à l'installation) |
 | P6 | Contrôle avant ouverture du réel : `go-live-check.sh <PV>` (conformité, plateforme, restauration, tâches programmées, gouvernance) | ☑ |
 | P7 | Répétition complète en local de la pile de production | ☑ 18/19 vérifications (reste : SMTP, voir L3) |
-| P8 | Fusion de la branche `feat/api-checkout-saas` et étiquette de version | ☐ |
+| P8 | Fusion de la branche `feat/api-checkout-saas` et étiquette de version | ☑ `v1.0.0` (20/11/2026) |
 
 ## Phase 2 — Prestataire n°1 (YouCan Pay)
 
