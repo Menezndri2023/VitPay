@@ -193,6 +193,51 @@ export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs:
   );
 }
 
+/**
+ * Signal « paiement confirmé » : deux notes montantes générées par le navigateur (aucun fichier
+ * audio) et une vibration sur téléphone. Sans effet si le navigateur bloque le son.
+ */
+export function playPaidChime(): void {
+  try {
+    navigator.vibrate?.([80, 60, 120]);
+  } catch {
+    /* vibration indisponible */
+  }
+  try {
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const now = ctx.currentTime;
+    [
+      [880, 0],
+      [1318.5, 0.14],
+    ].forEach(([freq, at]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq!;
+      gain.gain.setValueAtTime(0.0001, now + at!);
+      gain.gain.exponentialRampToValueAtTime(0.25, now + at! + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + at! + 0.45);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + at!);
+      osc.stop(now + at! + 0.5);
+    });
+    setTimeout(() => void ctx.close().catch(() => undefined), 1200);
+  } catch {
+    /* son bloqué par le navigateur */
+  }
+}
+
+/** Joue le signal quand une valeur passe à « payée » (pas au premier affichage d'un objet déjà payé). */
+export function usePaidChime(status: string | undefined, enabled = true): void {
+  const prev = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (enabled && prev.current && prev.current !== 'paid' && status === 'paid') playPaidChime();
+    prev.current = status;
+  }, [status, enabled]);
+}
+
 /** Valeur différée (recherche à la frappe sans une requête par touche). */
 export function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);

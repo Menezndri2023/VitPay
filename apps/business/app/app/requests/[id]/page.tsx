@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, use, useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, errorText, Field, formatDate, formatMoney, LinkButton, newIdempotencyKey, PageHeader, PageSkeleton, StatusBadge, TestBadge, useToast } from '@vitpay/ui';
+import { Alert, Button, Card, errorText, Field, formatDate, formatMoney, LinkButton, newIdempotencyKey, PageHeader, PageSkeleton, StatusBadge, TestBadge, usePaidChime, useToast } from '@vitpay/ui';
 import { useOrg } from '../../org-context';
 import { SharePanel } from '../../share-panel';
 import { ACTOR_LABELS, Attempt, EVENT_LABELS, RequestDetail, STATUS_LABELS } from '../../types';
@@ -68,6 +68,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
   const [msg, setMsg] = useState<{ kind: 'success' | 'danger'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const canRefund = org.role === 'owner' || org.role === 'admin';
+  usePaidChime(r?.status);
 
   const load = useCallback(
     () =>

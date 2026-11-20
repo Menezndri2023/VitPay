@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, ApiError, Button, errorText, formatMoney, Icon, newIdempotencyKey, PageHeader, TestBadge } from '@vitpay/ui';
+import { Alert, ApiError, Button, errorText, formatMoney, Icon, newIdempotencyKey, PageHeader, TestBadge, usePaidChime } from '@vitpay/ui';
 import { useOrg } from '../org-context';
 import { RequestDetail, Terminal } from '../types';
 
@@ -24,6 +24,24 @@ export default function PosPage() {
   const [busy, setBusy] = useState(false);
   // Une clé par encaissement : un double appui sur « Générer » ne crée qu'une seule demande.
   const [idemKey, setIdemKey] = useState(newIdempotencyKey);
+  const [sound, setSound] = useState(true);
+  useEffect(() => {
+    try {
+      setSound(localStorage.getItem('vp_pos_sound') !== 'off');
+    } catch {
+      /* stockage indisponible */
+    }
+  }, []);
+  const toggleSound = () => {
+    setSound((v) => {
+      try {
+        localStorage.setItem('vp_pos_sound', v ? 'off' : 'on');
+      } catch {
+        /* ignore */
+      }
+      return !v;
+    });
+  };
 
   useEffect(() => {
     orgApi<{ id: string; name: string }[]>('/points-of-sale')
@@ -40,6 +58,8 @@ export default function PosPage() {
       })
       .catch(() => setTerminals([]));
   }, [orgApi]);
+
+  usePaidChime(current?.status, sound);
 
   useEffect(() => {
     if (!current || current.status !== 'open') return;
@@ -254,6 +274,9 @@ export default function PosPage() {
       <p className="vp-hint" style={{ textAlign: 'center', margin: 0 }}>
         Astuce : sur ordinateur, tapez le montant au clavier puis Entrée.
       </p>
+      <button type="button" className="vp-link-btn vp-small vp-muted" style={{ alignSelf: 'center' }} onClick={toggleSound} aria-pressed={sound}>
+        Signal sonore à la confirmation : {sound ? 'activé' : 'désactivé'}
+      </button>
     </div>
   );
 }
