@@ -46,7 +46,7 @@ En parallèle : CMI / Attijari Payment (dossier envoyé, kit d'intégration atte
 | # | Condition | État |
 |---|---|---|
 | L1 | Réponses écrites aux lignes A à F de [`COMPLIANCE.md`](COMPLIANCE.md) (avocat, BAM si nécessaire, CNDP) | ⛔ avocat / CNDP |
-| L2 | Hébergement de production validé (C2), serveur commandé, DNS de production | ⛔ L1 |
+| L2 | Hébergement de production validé (C2), serveur commandé, DNS de production. **Domaine retenu (20/11/2026) : `vitpay-ma.com`** (`api.`, `pay.`, `app.`, `admin.`), en attendant la confirmation d'un `.ma` | ⛔ L1 |
 | L3 | Envoi d'e-mails de production (Brevo ou autre) avec domaine authentifié (SPF, DKIM, DMARC) | ⛔ fondateur |
 | L4 | Test d'intrusion externe (F2) | ☐ à commander |
 | L5 | Procès-verbal d'activation signé → `LEGAL_SIGNOFF_REF` ; `PAYMENTS_LIVE_ENABLED=true` | ⛔ L1–L4 |
