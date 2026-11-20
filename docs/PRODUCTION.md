@@ -67,11 +67,41 @@ docker compose run --rm create-admin finance@<domaine> "Prénom Nom" finance
 - **Avant chaque déploiement** : automatique (`deploy.sh`).
 - **Test de restauration, mensuel et avant l'ouverture** : `scripts/restore-test.sh backups/<fichier>.dump.age <clé privée>`. La restauration se fait dans une base jetable, détruite ensuite. Retirez la clé privée du serveur juste après.
 
+## 4 bis. Surveillance et alertes
+
+**Interne** (`scripts/monitor.sh`, toutes les 5 minutes) contrôle :
+- l'API par Internet ;
+- les 7 conteneurs ;
+- les incidents critiques ;
+- les files en retard (événements, e-mails, webhooks) ;
+- les erreurs serveur récentes ;
+- le disque ;
+- l'ancienneté de la dernière sauvegarde ;
+- l'expiration du certificat.
+
+Une alerte part **quand un problème apparaît**, puis **quand il disparaît**, sans répétition entre les deux.
+
+1. Choisissez un canal :
+   - **ntfy** : application gratuite, aucun compte nécessaire. Inventez un sujet long et secret, abonnez-vous dans l'application, puis renseignez `ALERT_NTFY_URL=https://ntfy.sh/<sujet-secret>`.
+   - **Telegram** : créez un bot avec @BotFather, puis renseignez `ALERT_TELEGRAM_BOT_TOKEN` et `ALERT_TELEGRAM_CHAT_ID`.
+2. Lancez `scripts/monitor.sh --test` : l'alerte de test doit arriver sur votre téléphone.
+3. `crontab -e` → `*/5 * * * * cd ~/VitPay/infra/production && scripts/monitor.sh >> backups/monitor.log 2>&1`
+
+**Externe (indispensable).** Un serveur arrêté ne peut pas donner l'alerte lui-même. Ajoutez donc une sonde gratuite (UptimeRobot, Better Stack…) sur `https://api.<domaine>/health`, toutes les 5 minutes, avec une alerte vers le même téléphone.
+
 ## 5. Ouverture des paiements réels
 
 À ne faire **qu'après** levée de toutes les lignes A à F de [`COMPLIANCE.md`](COMPLIANCE.md) :
 
 1. Procès-verbal d'activation signé : sa référence (ex. `PV-2026-001`) devient `LEGAL_SIGNOFF_REF`.
+   `scripts/go-live-check.sh PV-2026-001` doit être **entièrement vert**. Il contrôle :
+   - les lignes de conformité cochées ;
+   - tous les contrôles de déploiement ;
+   - la console admin restreinte par adresse IP ;
+   - une restauration testée depuis moins de 31 jours ;
+   - les tâches programmées (sauvegarde, surveillance) ;
+   - au moins deux administrateurs avec MFA, dont un responsable conformité ;
+   - aucun incident critique ouvert.
 2. Dans `.env` : `PAYMENTS_LIVE_ENABLED=true` et `LEGAL_SIGNOFF_REF=PV-2026-001`, puis `scripts/deploy.sh <version>`.
 3. `scripts/verify.sh` affiche « paiements réels OUVERTS (procès-verbal PV-2026-001) ».
 4. Pour chaque commerçant pilote : KYB vérifié par la conformité dans la console admin, puis connexion de **son** compte prestataire en mode réel dans Business → Paramètres, puis création de sa clé `vp_sk_live_…`.

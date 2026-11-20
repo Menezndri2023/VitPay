@@ -35,6 +35,7 @@ check "e-mails : transport SMTP configuré" '[[ "${EMAIL_TRANSPORT:-log}" == smt
 check "sauvegardes chiffrées configurées (clé publique age)" '[[ -n "${BACKUP_AGE_RECIPIENT:-}" ]]'
 check "copie des sauvegardes hors serveur configurée" '[[ -n "${BACKUP_RCLONE_REMOTE:-}" ]]'
 check "sauvegarde de moins de 26 h" '[[ -n "$(find backups -name "vitpay-*.dump.age" -mmin -1560 2>/dev/null | head -1)" ]]'
+check "alertes de surveillance configurées" '[[ -n "${ALERT_NTFY_URL:-}" || ( -n "${ALERT_TELEGRAM_BOT_TOKEN:-}" && -n "${ALERT_TELEGRAM_CHAT_ID:-}" ) ]]'
 PUBIP="${PROD_PUBLIC_IP:-$(getent ahostsv4 "api.$PROD_DOMAIN" 2>/dev/null | awk "NR==1{print \$1}")}"
 check "PostgreSQL non exposé (5432 fermé côté public)" '[[ -z "$PUBIP" ]] || ! (timeout 3 bash -c "</dev/tcp/$PUBIP/5432") 2>/dev/null'
 echo "Résultat : $ok vérifications réussies, $ko en échec."

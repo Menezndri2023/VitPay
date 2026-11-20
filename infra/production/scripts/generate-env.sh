@@ -60,6 +60,11 @@ EMAIL_FROM='VitPay <no-reply@${DOMAIN}>'
 PAYMENTS_LIVE_ENABLED=false
 LEGAL_SIGNOFF_REF=
 
+# Alertes de surveillance (docs/PRODUCTION.md §6) : ntfy (ex. https://ntfy.sh/<sujet-secret>) et/ou Telegram
+ALERT_NTFY_URL=
+ALERT_TELEGRAM_BOT_TOKEN=
+ALERT_TELEGRAM_CHAT_ID=
+
 # Sauvegardes chiffrées hors serveur (docs/PRODUCTION.md §4)
 BACKUP_AGE_RECIPIENT=
 BACKUP_RCLONE_REMOTE=

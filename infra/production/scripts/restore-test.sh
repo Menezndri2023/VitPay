@@ -18,4 +18,6 @@ PSQL=(docker exec -i "$NAME" psql -h 127.0.0.1 -U postgres -d vitpay -v ON_ERROR
 for r in vitpay_owner vitpay_app vitpay_system; do "${PSQL[@]}" -qc "CREATE ROLE $r" >/dev/null; done
 age -d -i "$KEY" "$FILE" | docker exec -i "$NAME" pg_restore -h 127.0.0.1 -U postgres -d vitpay --no-owner --exit-on-error
 "${PSQL[@]}" -tAc "SELECT 'demandes de paiement : ' || count(*) FROM payment_requests UNION ALL SELECT 'organisations : ' || count(*) FROM organizations UNION ALL SELECT 'écritures comptables : ' || count(*) FROM journal_entries UNION ALL SELECT 'journal d''audit : ' || count(*) FROM audit_log"
+# Preuve datée pour le contrôle d'ouverture du réel (go-live-check.sh).
+date -u +%FT%TZ > backups/.last-restore-test
 echo "✓ restauration réussie (base jetable détruite)"
