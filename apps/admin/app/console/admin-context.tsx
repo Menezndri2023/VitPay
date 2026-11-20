@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
-import { api } from '@vitpay/ui';
+import { api, errorText, PageSkeleton } from '@vitpay/ui';
 
 export interface AdminMe {
   user: { id: string; email: string; fullName: string; platformRole: string };
@@ -22,7 +22,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       .then((m) => (m.session.mfaVerified ? setMe(m) : window.location.assign('/login')))
       .catch(() => window.location.assign('/login'));
   }, []);
-  if (!me) return <div className="vp-container vp-muted">Chargement…</div>;
+  if (!me)
+    return (
+      <div className="vp-container" style={{ paddingTop: 32 }}>
+        <PageSkeleton />
+      </div>
+    );
   return <Ctx.Provider value={me}>{children}</Ctx.Provider>;
 }
 
@@ -33,12 +38,18 @@ export function useLoad<T>(path: string | null): { data: T | null; error: string
   const [n, setN] = useState(0);
   useEffect(() => {
     if (!path) return;
+    // Une réponse arrivée après un changement de filtre (chemin) est ignorée.
+    let stale = false;
     api<T>(path)
       .then((d) => {
+        if (stale) return;
         setData(d);
         setError(null);
       })
-      .catch((e) => setError((e as Error).message));
+      .catch((e) => !stale && setError(errorText(e)));
+    return () => {
+      stale = true;
+    };
   }, [path, n]);
   return { data, error, reload: () => setN((x) => x + 1) };
 }

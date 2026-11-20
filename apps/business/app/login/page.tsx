@@ -18,15 +18,15 @@ export default function LoginPage() {
     }
   });
   return (
-    <AuthCard title="Connexion" footer={<p className="vp-small" style={{ textAlign: 'center' }}>Pas encore de compte ? <a href="/register">Créer un compte</a></p>}>
+    <AuthCard title="Connexion" subtitle="Accédez à votre espace commerçant." footer={<p className="vp-small" style={{ textAlign: 'center', margin: 0 }}>Pas encore de compte ? <a href="/register">Créer un compte</a></p>}>
       <form className="vp-stack" onSubmit={onSubmit}>
         <Field label="E-mail" name="email" type="email" autoComplete="email" required />
         <Field label="Mot de passe" name="password" type="password" autoComplete="current-password" required />
         <ErrorBox />
-        <Submit label="Se connecter" />
-        <a className="vp-small" href="/forgot-password" style={{ textAlign: 'center' }}>
+        <a className="vp-small" href="/forgot-password" style={{ alignSelf: 'flex-end', marginTop: -4 }}>
           Mot de passe oublié ?
         </a>
+        <Submit label="Se connecter" />
       </form>
     </AuthCard>
   );

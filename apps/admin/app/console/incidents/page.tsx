@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, api, ApiError, Button, Card, formatDate, StatusBadge } from '@vitpay/ui';
+import { Alert, api, Button, Card, formatDate, StatusBadge, errorText } from '@vitpay/ui';
 import { useLoad } from '../admin-context';
 
 interface Incident {
@@ -29,7 +29,7 @@ export default function IncidentsPage() {
       await api(`/v1/admin/incidents/${id}/resolve`, { method: 'POST', body: { note } });
       reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Erreur');
+      setErr(errorText(e));
     }
   };
 

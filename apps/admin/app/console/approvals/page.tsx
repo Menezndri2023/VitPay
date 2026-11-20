@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, api, ApiError, Button, Card, formatDate, StatusBadge } from '@vitpay/ui';
+import { Alert, api, Button, Card, formatDate, StatusBadge, errorText } from '@vitpay/ui';
 import { useAdmin, useLoad } from '../admin-context';
 
 interface Approval {
@@ -34,7 +34,7 @@ export default function ApprovalsPage() {
       await api(`/v1/admin/approvals/${id}/decision`, { method: 'POST', body: { decision, note } });
       reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Erreur');
+      setErr(errorText(e));
     }
   };
 

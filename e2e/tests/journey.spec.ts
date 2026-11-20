@@ -195,7 +195,7 @@ test('mot de passe oublié : e-mail réel (SMTP → Mailpit) puis réinitialisat
 
 test('KYB : dépôt d’un justificatif depuis les paramètres', async ({ page }) => {
   await useMerchantSession(page);
-  await page.goto(`${BIZ}/app/settings`);
+  await page.goto(`${BIZ}/app/settings?tab=company`);
   await page.getByLabel('Type de document').selectOption('ice_certificate');
   await page.getByLabel('Fichier').setInputFiles({ name: 'attestation-ice.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF\n') });
   await page.getByRole('button', { name: 'Envoyer' }).click();
@@ -274,7 +274,7 @@ test('TPE simulé : encaissement carte présente depuis la caisse', async ({ pag
   await useMerchantSession(page);
 
   // Ajout d'un TPE simulé
-  await page.goto(`${BIZ}/app/settings`);
+  await page.goto(`${BIZ}/app/settings?tab=pos`);
   await page.getByLabel('Nom du TPE simulé').fill(label);
   await page.getByRole('button', { name: 'Ajouter un TPE simulé' }).click();
   await expect(page.getByText('TPE simulé ajouté.')).toBeVisible();

@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Alert, api, ApiError, Button, Card, Field, formatDate, formatMoney, MoneyView, Select, StatusBadge } from '@vitpay/ui';
+import { Alert, api, ApiError, Button, Card, Field, formatDate, formatMoney, MoneyView, Select, StatusBadge, errorText } from '@vitpay/ui';
 import { useLoad } from '../admin-context';
 
 interface Statement {
@@ -34,7 +34,7 @@ export default function BillingPage() {
       setMsg({ kind: 'success', text: ok });
       reload();
     } catch (e) {
-      setMsg({ kind: 'danger', text: e instanceof ApiError ? e.message : 'Erreur' });
+      setMsg({ kind: 'danger', text: errorText(e) });
     }
   };
 

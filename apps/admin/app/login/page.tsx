@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Alert, api, ApiError, Button, Field, Footer, Logo } from '@vitpay/ui';
+import { Alert, api, ApiError, Button, Field, Icon, Logo } from '@vitpay/ui';
 
 type Step = 'credentials' | 'enroll' | 'verify';
 
@@ -48,13 +48,29 @@ export default function AdminLogin() {
   };
 
   return (
-    <main className="vp-narrow" style={{ paddingTop: 48 }}>
-      <div className="vp-stack">
-        <div style={{ textAlign: 'center' }}>
-          <Logo />
-          <div className="vp-muted vp-small">ADMIN — accès restreint, toutes les actions sont journalisées</div>
+    <div className="vp-auth">
+      <aside className="vp-auth-side">
+        <Logo suffix="Admin" />
+        <div>
+          <h2>Console d’administration</h2>
+          <p>Accès réservé à l’équipe VITPAY.</p>
+          <ul className="vp-auth-points">
+            {['Double authentification obligatoire', 'Décisions sensibles validées par deux administrateurs', 'Chaque action est inscrite au journal d’audit'].map((p) => (
+              <li key={p}>
+                <Icon name="shield" />
+                {p}
+              </li>
+            ))}
+          </ul>
         </div>
-        <form className="vp-card vp-stack" onSubmit={submit}>
+        <span />
+      </aside>
+      <main className="vp-auth-main">
+        <div className="vp-auth-card">
+          <div className="vp-auth-mobile-logo">
+            <Logo suffix="Admin" />
+          </div>
+        <form className="vp-stack" onSubmit={submit}>
           {step === 'credentials' && (
             <>
               <h1>Connexion administrateur</h1>
@@ -91,13 +107,13 @@ export default function AdminLogin() {
           )}
           {error && <Alert kind="danger">{error}</Alert>}
           {(step !== 'enroll' || enroll) && (
-            <Button type="submit" block>
+            <Button type="submit" block size="lg">
               {step === 'credentials' ? 'Continuer' : 'Valider'}
             </Button>
           )}
         </form>
-        <Footer />
-      </div>
-    </main>
+        </div>
+      </main>
+    </div>
   );
 }

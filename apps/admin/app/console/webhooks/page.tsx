@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Alert, api, ApiError, Button, Card, formatDate, StatusBadge } from '@vitpay/ui';
+import { Alert, api, Button, Card, formatDate, StatusBadge, errorText } from '@vitpay/ui';
 import { useLoad } from '../admin-context';
 
 interface Webhook {
@@ -25,7 +25,7 @@ export default function WebhooksPage() {
       await api(`/v1/admin/webhooks/${id}/replay`, { method: 'POST' });
       reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Erreur');
+      setErr(errorText(e));
     }
   };
   return (

@@ -33,11 +33,11 @@ export default function RegisterPage() {
     }
   });
   return (
-    <AuthCard title="Créer un compte" footer={<p className="vp-small" style={{ textAlign: 'center' }}>Déjà inscrit ? <a href="/login">Se connecter</a></p>}>
+    <AuthCard title="Créer un compte" subtitle="Essayez tout en mode test, puis connectez votre prestataire de paiement." footer={<p className="vp-small" style={{ textAlign: 'center', margin: 0 }}>Déjà inscrit ? <a href="/login">Se connecter</a></p>}>
       <form className="vp-stack" onSubmit={onSubmit}>
         <Field label="Nom complet" name="fullName" autoComplete="name" required minLength={2} />
         <Field label="E-mail professionnel" name="email" type="email" autoComplete="email" required />
-        <Field label="Mot de passe" name="password" type="password" autoComplete="new-password" required minLength={12} hint="12 caractères minimum" />
+        <Field label="Mot de passe" name="password" type="password" autoComplete="new-password" required minLength={12} hint="12 caractères minimum. Une phrase de passe est plus simple à retenir." />
         <Field label="Nom commercial" name="organizationName" required minLength={2} hint="Affiché aux payeurs sur la page de paiement" />
         <Select label="Type de compte" name="organizationType" defaultValue="business">
           <option value="business">Entreprise / indépendant</option>

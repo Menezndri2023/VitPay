@@ -2,18 +2,31 @@
 
 import { useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { api, Logo } from '@vitpay/ui';
+import { Alert, api, AppShell, Icon, LinkButton, ROLE_LABELS_FR, ToastProvider, type NavGroup } from '@vitpay/ui';
 import { OrgProvider, useOrg } from './org-context';
 
-const NAV = [
-  { href: '/app', label: 'Tableau de bord' },
-  { href: '/app/requests', label: 'Demandes' },
-  { href: '/app/requests/new', label: 'Nouvelle demande' },
-  { href: '/app/pos', label: 'Caisse (QR)' },
-  { href: '/app/notifications', label: 'Notifications' },
-  { href: '/app/developers', label: 'Développeurs' },
-  { href: '/app/settings', label: 'Paramètres' },
-];
+function nav(role: string): NavGroup[] {
+  const groups: NavGroup[] = [
+    {
+      items: [
+        { href: '/app', label: 'Tableau de bord', icon: 'home', exact: true },
+        { href: '/app/requests', label: 'Demandes', icon: 'list' },
+        { href: '/app/pos', label: 'Caisse', icon: 'qr' },
+        { href: '/app/notifications', label: 'Notifications', icon: 'bell' },
+      ],
+    },
+  ];
+  if (role === 'owner' || role === 'admin')
+    groups.push({
+      label: 'Configuration',
+      items: [
+        { href: '/app/settings', label: 'Paramètres', icon: 'settings' },
+        { href: '/app/developers', label: 'Développeurs', icon: 'code' },
+      ],
+    });
+  else groups[0]!.items.push({ href: '/app/settings', label: 'Paramètres', icon: 'settings' });
+  return groups;
+}
 
 function VerifyEmailBanner({ email }: { email: string }) {
   const [state, setState] = useState<'idle' | 'sent' | 'error'>('idle');
@@ -26,18 +39,18 @@ function VerifyEmailBanner({ email }: { email: string }) {
     }
   };
   return (
-    <div className="vp-alert vp-alert-warning" style={{ marginBottom: 16 }} role="status">
+    <Alert kind="warning">
       Confirmez votre adresse <strong>{email}</strong> avec le lien reçu par e-mail. D’ici là, la connexion d’un prestataire, l’équipe, les intégrations et le dossier KYB restent bloqués.{' '}
       {state === 'sent' ? (
         <span>Nouveau lien envoyé.</span>
       ) : state === 'error' ? (
         <span>Envoi impossible pour l’instant, réessayez plus tard.</span>
       ) : (
-        <button type="button" onClick={resend} style={{ background: 'none', border: 0, padding: 0, color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}>
+        <button type="button" className="vp-link-btn" onClick={resend}>
           Renvoyer le lien
         </button>
       )}
-    </div>
+    </Alert>
   );
 }
 
@@ -49,51 +62,60 @@ function Shell({ children }: { children: ReactNode }) {
     await api('/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     router.replace('/login');
   };
+  const canCreate = org.role !== 'viewer' && org.status === 'active';
   return (
-    <div className="vp-shell">
-      <nav className="vp-sidebar" aria-label="Navigation principale">
-        <Logo href="/app" />
-        {NAV.map((n) => (
-          <a key={n.href} className="vp-nav-link" href={n.href} aria-current={pathname === n.href ? 'page' : undefined}>
-            {n.label}
-          </a>
-        ))}
-        <div style={{ flex: 1 }} />
-        {me.organizations.length > 1 && (
-          <select aria-label="Organisation" className="vp-input" value={orgId} onChange={(e) => setOrgId(e.target.value)} style={{ background: 'transparent', color: '#fff' }}>
-            {me.organizations.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.displayName}
-              </option>
-            ))}
-          </select>
-        )}
-        <div className="vp-small" style={{ padding: '8px 12px', color: '#9fb2d3' }}>
-          {org.displayName}
-          <br />
-          {me.user.fullName} · {org.role}
-        </div>
-        <button className="vp-nav-link" style={{ background: 'none', border: 0, textAlign: 'start', cursor: 'pointer', font: 'inherit' }} onClick={logout}>
-          Se déconnecter
-        </button>
-      </nav>
-      <main className="vp-main">
-        {!me.user.emailVerified && <VerifyEmailBanner email={me.user.email} />}
-        {org.status !== 'active' && (
-          <div className="vp-alert vp-alert-danger" style={{ marginBottom: 16 }}>
-            Votre organisation est suspendue. Les nouvelles opérations sont bloquées. Contactez le support VITPAY.
+    <AppShell
+      pathname={pathname}
+      nav={nav(org.role)}
+      home="/app"
+      cta={
+        canCreate ? (
+          <LinkButton href="/app/requests/new" icon="plus">
+            Nouvelle demande
+          </LinkButton>
+        ) : undefined
+      }
+      footer={
+        <>
+          <div className="vp-who">
+            <strong>{org.displayName}</strong>
+            {me.user.fullName} · {ROLE_LABELS_FR[org.role] ?? org.role}
+            {me.organizations.length > 1 && (
+              <select aria-label="Changer d’organisation" className="vp-input" value={orgId} onChange={(e) => setOrgId(e.target.value)}>
+                {me.organizations.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.displayName}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <button type="button" className="vp-nav-link" onClick={logout}>
+            <Icon name="logout" />
+            Se déconnecter
+          </button>
+        </>
+      }
+    >
+      <div className="vp-stack-lg">
+        {(!me.user.emailVerified || org.status !== 'active') && (
+          <div className="vp-stack">
+            {!me.user.emailVerified && <VerifyEmailBanner email={me.user.email} />}
+            {org.status !== 'active' && <Alert kind="danger">Votre organisation est suspendue. Les nouvelles opérations sont bloquées. Contactez le support VITPAY.</Alert>}
           </div>
         )}
         {children}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <OrgProvider>
-      <Shell>{children}</Shell>
-    </OrgProvider>
+    <ToastProvider>
+      <OrgProvider>
+        <Shell>{children}</Shell>
+      </OrgProvider>
+    </ToastProvider>
   );
 }

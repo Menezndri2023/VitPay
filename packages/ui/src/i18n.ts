@@ -35,6 +35,9 @@ const fr = {
   'pay.unavailable': 'Cette demande ne peut pas être payée pour le moment.',
   'pay.processedBy': 'Paiement traité par un prestataire de paiement agréé. VITPAY ne conserve aucune donnée de carte.',
   'pay.sandbox': 'ENVIRONNEMENT DE TEST — AUCUN PAIEMENT RÉEL',
+  'pay.amountDue': 'Montant à payer',
+  'pay.notfound.desc': 'Vérifiez le lien reçu ou contactez le commerçant qui vous l’a envoyé.',
+  'pay.language': 'Langue',
   'common.loading': 'Chargement…',
   'common.error': 'Une erreur est survenue. Réessayez.',
 } as const;
@@ -71,6 +74,9 @@ const ar: Record<MessageKey, string> = {
   'pay.unavailable': 'لا يمكن دفع هذا الطلب حاليًا.',
   'pay.processedBy': 'تتم معالجة الدفع من طرف مزود دفع معتمد. لا تحتفظ VITPAY بأي بيانات للبطاقة.',
   'pay.sandbox': 'بيئة اختبار — لا يوجد دفع حقيقي',
+  'pay.amountDue': 'المبلغ المطلوب',
+  'pay.notfound.desc': 'تحقق من الرابط الذي توصلت به أو اتصل بالتاجر الذي أرسله إليك.',
+  'pay.language': 'اللغة',
   'common.loading': 'جارٍ التحميل…',
   'common.error': 'حدث خطأ. حاول مرة أخرى.',
 };
@@ -105,6 +111,9 @@ const en: Record<MessageKey, string> = {
   'pay.unavailable': 'This request cannot be paid at the moment.',
   'pay.processedBy': 'Payment processed by a licensed payment provider. VITPAY stores no card data.',
   'pay.sandbox': 'TEST ENVIRONMENT — NO REAL PAYMENT',
+  'pay.amountDue': 'Amount due',
+  'pay.notfound.desc': 'Check the link you received or contact the merchant who sent it.',
+  'pay.language': 'Language',
   'common.loading': 'Loading…',
   'common.error': 'Something went wrong. Please try again.',
 };

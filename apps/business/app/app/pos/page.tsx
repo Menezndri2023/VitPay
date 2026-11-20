@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Alert, ApiError, Button, formatMoney, newIdempotencyKey } from '@vitpay/ui';
+import { Alert, ApiError, Button, errorText, formatMoney, Icon, newIdempotencyKey, PageHeader, TestBadge } from '@vitpay/ui';
 import { useOrg } from '../org-context';
 import { RequestDetail, Terminal } from '../types';
 
@@ -21,12 +21,17 @@ export default function PosPage() {
   const [error, setError] = useState<string | null>(null);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [terminalId, setTerminalId] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Une clé par encaissement : un double appui sur « Générer » ne crée qu'une seule demande.
+  const [idemKey, setIdemKey] = useState(newIdempotencyKey);
 
   useEffect(() => {
-    orgApi<{ id: string; name: string }[]>('/points-of-sale').then((p) => {
-      setPos(p);
-      setPosId(p[0]?.id ?? '');
-    });
+    orgApi<{ id: string; name: string }[]>('/points-of-sale')
+      .then((p) => {
+        setPos(p);
+        setPosId(p[0]?.id ?? '');
+      })
+      .catch(() => setPos([]));
     orgApi<Terminal[]>('/terminals')
       .then((t) => {
         const active = t.filter((x) => x.status === 'active');
@@ -39,6 +44,7 @@ export default function PosPage() {
   useEffect(() => {
     if (!current || current.status !== 'open') return;
     const t = setInterval(async () => {
+      if (document.visibilityState !== 'visible') return;
       const r = await orgApi<RequestDetail>(`/payment-requests/${current.id}`).catch(() => null);
       if (r) setCurrent(r);
     }, 2000);
@@ -53,17 +59,38 @@ export default function PosPage() {
     setAmount((a) => (a === '0' && k !== ',' ? k : a + k));
   };
 
+  // Saisie au clavier physique (caisse sur ordinateur) : chiffres, virgule ou point, retour arrière, Entrée.
+  useEffect(() => {
+    if (current) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (/^[0-9]$/.test(e.key)) press(e.key);
+      else if (e.key === ',' || e.key === '.') press(',');
+      else if (e.key === 'Backspace') press('⌫');
+      else if (e.key === 'Enter' && amount && amount !== '0' && !amount.endsWith(',')) void charge();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const charge = async () => {
+    if (busy) return;
     setError(null);
+    setBusy(true);
     try {
       const created = await orgApi<{ id: string }>('/payment-requests', {
         method: 'POST',
-        idempotencyKey: newIdempotencyKey(),
+        idempotencyKey: idemKey,
         body: { amount: amount.replace(',', '.'), currency: 'MAD', description: 'Paiement en caisse', posId: posId || undefined, expiresInHours: 1 },
       });
       setCurrent(await orgApi<RequestDetail>(`/payment-requests/${created.id}`));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Erreur');
+      setError(errorText(e));
+      if (e instanceof ApiError && e.status < 500) setIdemKey(newIdempotencyKey());
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -77,7 +104,7 @@ export default function PosPage() {
     try {
       await orgApi(`/payment-requests/${current.id}/terminal-payment`, { method: 'POST', body: { terminalId } });
     } catch (e) {
-      setError(e instanceof ApiError ? (e.code === 'terminal_busy' ? 'Le TPE affiche déjà un autre encaissement.' : e.message) : 'Erreur');
+      setError(errorText(e));
     }
     await refresh();
   };
@@ -87,7 +114,7 @@ export default function PosPage() {
     try {
       await orgApi(`/terminal-payments/${attemptId}/cancel`, { method: 'POST' });
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Erreur');
+      setError(errorText(e));
     }
     await refresh();
   };
@@ -95,6 +122,7 @@ export default function PosPage() {
   const reset = () => {
     setCurrent(null);
     setAmount('');
+    setIdemKey(newIdempotencyKey());
   };
 
   /** Abandon en caisse : la demande est annulée pour que le QR affiché ne soit plus payable. */
@@ -114,6 +142,11 @@ export default function PosPage() {
   if (current)
     return (
       <div className="vp-stack" style={{ maxWidth: 480, margin: '0 auto', textAlign: 'center' }}>
+        {current.mode === 'sandbox' && (
+          <div>
+            <TestBadge label="Mode test" />
+          </div>
+        )}
         <div className="vp-amount">{formatMoney(current.amount)}</div>
         {current.status === 'open' && (
           <>
@@ -166,12 +199,18 @@ export default function PosPage() {
         )}
         {current.status === 'paid' && (
           <>
+            <div className="vp-result-icon vp-result-ok" style={{ width: 88, height: 88 }}>
+              <Icon name="check" style={{ width: 44, height: 44 }} />
+            </div>
             <Alert kind="success">
               <strong>Paiement confirmé</strong> — référence {current.reference}
             </Alert>
-            <Button variant="accent" onClick={reset}>
+            <Button size="lg" icon="plus" onClick={reset}>
               Nouvel encaissement
             </Button>
+            <a className="vp-small" href={`/app/requests/${current.id}`}>
+              Voir le détail et le reçu
+            </a>
           </>
         )}
         {(current.status === 'expired' || current.status === 'cancelled') && (
@@ -185,7 +224,7 @@ export default function PosPage() {
 
   return (
     <div className="vp-stack" style={{ maxWidth: 420, margin: '0 auto' }}>
-      <h1>Caisse</h1>
+      <PageHeader title="Caisse" subtitle="Saisissez le montant : le client scanne le QR code ou paie sur le TPE." />
       {pos.length > 1 && (
         <select className="vp-input" value={posId} onChange={(e) => setPosId(e.target.value)} aria-label="Point de vente">
           {pos.map((p) => (
@@ -195,23 +234,26 @@ export default function PosPage() {
           ))}
         </select>
       )}
-      <div className="vp-card" style={{ textAlign: 'end' }}>
-        <div className="vp-muted vp-small">Montant à encaisser</div>
+      <div className="vp-card" style={{ textAlign: 'end', background: 'var(--vp-cedar-900)', color: '#fff', borderColor: 'transparent' }}>
+        <div className="vp-small" style={{ color: '#a9c9b8' }}>Montant à encaisser</div>
         <div className="vp-amount" aria-live="polite">
-          {amount || '0'} <span style={{ fontSize: 20 }}>MAD</span>
+          {amount || '0'} <span style={{ fontSize: 20, color: 'var(--vp-saffron-500)' }}>MAD</span>
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
         {KEYS.map((k) => (
-          <button key={k} className="vp-btn vp-btn-ghost" style={{ minHeight: 64, fontSize: 22 }} onClick={() => press(k)} aria-label={k === '⌫' ? 'Effacer' : k}>
-            {k}
+          <button key={k} type="button" className="vp-btn vp-btn-ghost vp-num" style={{ minHeight: 64, fontSize: 24, fontWeight: 650 }} onClick={() => press(k)} aria-label={k === '⌫' ? 'Effacer' : k}>
+            {k === '⌫' ? <Icon name="back" style={{ width: 24, height: 24 }} /> : k}
           </button>
         ))}
       </div>
       {error && <Alert kind="danger">{error}</Alert>}
-      <Button variant="accent" block disabled={!amount || amount === '0' || amount.endsWith(',')} onClick={charge} style={{ minHeight: 56, fontSize: 18 }}>
+      <Button block size="lg" icon="qr" busy={busy} disabled={!amount || amount === '0' || amount.endsWith(',')} onClick={charge}>
         Générer le QR d’encaissement
       </Button>
+      <p className="vp-hint" style={{ textAlign: 'center', margin: 0 }}>
+        Astuce : sur ordinateur, tapez le montant au clavier puis Entrée.
+      </p>
     </div>
   );
 }
