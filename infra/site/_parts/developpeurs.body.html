@@ -1,5 +1,5 @@
   <h1>Développeurs</h1>
-  <p class="updated">Intégrez l’encaissement VitPay à votre site ou à votre logiciel · API v1 · mise à jour le 21 novembre 2026</p>
+  <p class="updated">Intégrez l’encaissement VitPay à votre site ou à votre logiciel · API v1 · mise à jour le 20 novembre 2026</p>
 
   <p>VitPay vous donne une seule API pour encaisser vos clients par carte : demandes de paiement, page de paiement hébergée, webhooks signés, remboursements et reçus. Les paiements sont exécutés par <strong>votre propre compte</strong> chez un prestataire de paiement agréé, qui vous verse directement les fonds.</p>
 
@@ -88,7 +88,7 @@ Content-Type: application/json
 VitPay-Event-Id: evt_123
 VitPay-Signature: t=1763700000,v1=5f2b…
 
-{"id":"evt_123","type":"payment.succeeded","created":"2026-11-21T09:00:00.000Z","livemode":false,
+{"id":"evt_123","type":"payment.succeeded","created":"2026-11-20T09:00:00.000Z","livemode":false,
  "data":{"objectType":"payment_attempt","objectId":"…","requestId":"…","merchantReference":"INV-2026-0042",
          "metadata":{"invoiceId":"INV-2026-0042"},"amount":{"amount":"19900","currency":"MAD"}}}</code></pre>
   <p><strong>Vérifier la signature.</strong> Elle se vérifie sur le <strong>corps brut</strong>, avant tout parsing JSON. La signature <code>v1</code> est le HMAC-SHA256, en hexadécimal, de <code>t + "." + corps</code>, calculé avec votre secret. Pendant un changement de secret, l’en-tête contient <strong>plusieurs</strong> <code>v1</code> : une seule doit correspondre.</p>

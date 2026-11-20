@@ -24,7 +24,7 @@ Authorization: Bearer vp_sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - Développez et testez avec la clé de test, puis remplacez-la par la clé réelle : **le code ne change pas**.
 - Une demande de l'autre mode répond `404` : une clé de test ne peut ni lire, ni annuler, ni rembourser un paiement réel.
 - Les clés réelles ne sont proposées qu'à l'ouverture des paiements réels. Avant, leur création répond `409`.
-- Les clés créées avant le 21/11/2026 (`vp_sk_…` sans mode) restent valides et sont des clés de test.
+- Les clés créées avant le 20/11/2026 (`vp_sk_…` sans mode) restent valides et sont des clés de test.
 - `Idempotency-Key` : les espaces de test et réel sont séparés.
 
 Règles d'utilisation :
