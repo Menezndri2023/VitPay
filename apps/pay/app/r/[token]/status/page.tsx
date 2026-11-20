@@ -6,6 +6,7 @@ import { PublicRequest, useLocale } from '../use-locale';
 
 const POLL_MS = 2000;
 const MAX_POLLS = 90;
+const REDIRECT_MS = 5000;
 
 /**
  * Page de retour : elle n'utilise JAMAIS les paramètres d'URL renvoyés par le prestataire.
@@ -44,6 +45,14 @@ export default function StatusPage({ params }: { params: Promise<{ token: string
 
   const failed = req?.status === 'open' && req.latestAttempt && ['failed', 'cancelled', 'expired'].includes(req.latestAttempt.status);
   const pending = req?.status === 'open' && !failed;
+  const paidReturn = req?.status === 'paid' ? req.returnUrl : null;
+
+  // Paiement confirmé : retour automatique vers le site du commerçant après quelques secondes.
+  useEffect(() => {
+    if (!paidReturn) return;
+    const timer = setTimeout(() => window.location.assign(paidReturn), REDIRECT_MS);
+    return () => clearTimeout(timer);
+  }, [paidReturn]);
 
   return (
     <>
@@ -66,6 +75,16 @@ export default function StatusPage({ params }: { params: Promise<{ token: string
               <a className="vp-btn vp-btn-ghost" href={`/api/v1/public/requests/${encodeURIComponent(token)}/receipt.pdf`}>
                 {t('pay.receipt')}
               </a>
+              {paidReturn && (
+                <>
+                  <p className="vp-muted vp-small" style={{ margin: 0 }}>
+                    {t('pay.redirecting')}
+                  </p>
+                  <a className="vp-btn" href={paidReturn} rel="noreferrer">
+                    {t('pay.backToMerchant')}
+                  </a>
+                </>
+              )}
             </>
           )}
           {pending && !timedOut && (
@@ -86,6 +105,11 @@ export default function StatusPage({ params }: { params: Promise<{ token: string
           {req?.status === 'expired' && <Alert kind="warning">{t('pay.status.expired')}</Alert>}
           {req?.status === 'cancelled' && <Alert kind="warning">{t('pay.status.cancelled')}</Alert>}
           {timedOut && <Alert kind="warning">{t('pay.status.pending.desc')}</Alert>}
+          {req?.returnUrl && req.status !== 'paid' && (failed || req.status !== 'open') && (
+            <a className="vp-btn vp-btn-ghost" href={req.returnUrl} rel="noreferrer">
+              {t('pay.backToMerchant')}
+            </a>
+          )}
         </section>
         <Footer />
       </main>

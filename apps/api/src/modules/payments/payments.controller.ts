@@ -30,6 +30,15 @@ const CreateRequest = z.object({
   customerContact: z.string().trim().max(120).optional(),
   expiresInHours: z.number().int().min(1).max(720).optional(),
   posId: UUID.optional(),
+  /** Retour du client sur le site du commerçant (HTTPS hors environnement local). */
+  successUrl: z.string().trim().max(2048).optional(),
+  cancelUrl: z.string().trim().max(2048).optional(),
+  customerEmail: z.email().max(254).optional(),
+  /** Données libres du commerçant (n° de facture, id client…), renvoyées telles quelles dans les webhooks. */
+  metadata: z
+    .record(z.string().regex(/^[A-Za-z0-9_.-]{1,40}$/, 'Metadata keys: 1-40 characters among letters, digits and _ . -'), z.string().max(500))
+    .refine((m) => Object.keys(m).length <= 20, 'At most 20 metadata keys')
+    .optional(),
 });
 const ListQuery = z.object({
   status: z.enum(['open', 'paid', 'expired', 'cancelled']).optional(),

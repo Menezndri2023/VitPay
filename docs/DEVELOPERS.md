@@ -35,6 +35,35 @@ La réponse est `201` et contient notamment `id`, `reference`, `status: "open"`,
 - **Idempotence** : l'en-tête `Idempotency-Key` est obligatoire. Rejouer la même requête avec la même clé renvoie la même demande (en-tête `Idempotent-Replayed: true`) : en cas de coupure réseau, réessayez sans risque de doublon.
 - **Montants** : chaîne décimale (`"149.90"`), jamais un nombre flottant.
 
+### Intégration à un logiciel (SaaS, e-commerce)
+
+Champs facultatifs pour rattacher le paiement à votre facture et ramener le client chez vous :
+
+| Champ | Rôle |
+|---|---|
+| `merchantReference` | Votre n° de commande ou de facture (unique dans votre organisation, 1 à 64 caractères). |
+| `successUrl` | Page de votre site où le client revient **après un paiement confirmé** (redirection automatique après 5 s). |
+| `cancelUrl` | Page où le client revient s'il **abandonne**, ou si la demande a expiré ou été annulée. |
+| `customerEmail` | E-mail du client (visible par vous uniquement, jamais sur la page publique). |
+| `metadata` | Jusqu'à 20 paires clé/valeur texte (clé : 1 à 40 caractères `A-Z a-z 0-9 _ . -`, valeur : 500 caractères au plus). Renvoyées telles quelles dans les webhooks. |
+
+```bash
+curl -X POST "$VITPAY_API/v1/orgs/$ORG_ID/payment-requests" \
+  -H "Authorization: Bearer $VITPAY_KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: facture-INV-2026-0042" \
+  -d '{"amount":"199.00","currency":"MAD","description":"Abonnement Pro – décembre",
+       "merchantReference":"INV-2026-0042","customerEmail":"client@exemple.ma",
+       "successUrl":"https://app.exemple.ma/facturation/merci",
+       "cancelUrl":"https://app.exemple.ma/facturation",
+       "metadata":{"invoiceId":"INV-2026-0042","customerId":"cus_81"}}'
+```
+
+Au retour, VITPAY ajoute à votre URL : `vitpay_request_id`, `vitpay_reference` et `vitpay_status` (`paid`, `open`, `expired`, `cancelled`). Vos propres paramètres sont conservés.
+
+> ⚠️ **Ces paramètres sont indicatifs.** N'activez jamais un service sur la seule foi de l'URL de retour : n'importe qui peut la saisir. Confirmez par le webhook `payment.succeeded` ou par `GET …/payment-requests/{vitpay_request_id}` (`status: "paid"`).
+
+Règles : URL absolue en **HTTPS**, sans identifiants (`user:pass@`) ni fragment (`#`), 2048 caractères au plus.
+
 Les autres opérations sont décrites dans [`API_SPECIFICATION.md`](API_SPECIFICATION.md) : consultation (`GET …/payment-requests/:id`), annulation et remboursement.
 
 ## 3. Webhooks
@@ -52,7 +81,8 @@ VitPay-Event-Id: evt_123
 VitPay-Signature: t=1731250000,v1=5f2b…
 
 {"id":"evt_123","type":"payment.succeeded","created":"2026-11-10T16:42:00.000Z",
- "data":{"objectType":"payment_attempt","objectId":"…","requestId":"…","amount":{"amount":"14990","currency":"MAD"}}}
+ "data":{"objectType":"payment_attempt","objectId":"…","requestId":"…","merchantReference":"INV-2026-0042",
+         "metadata":{"invoiceId":"INV-2026-0042","customerId":"cus_81"},"amount":{"amount":"14990","currency":"MAD"}}}
 ```
 
 ### Vérifier la signature (Node.js)

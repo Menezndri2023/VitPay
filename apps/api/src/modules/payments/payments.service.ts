@@ -22,6 +22,35 @@ import {
   PaymentRequestStatus,
 } from './state-machines';
 
+export interface CreateRequestInput {
+  amount: string;
+  currency: string;
+  merchantReference?: string;
+  description?: string;
+  customerName?: string;
+  customerContact?: string;
+  customerEmail?: string;
+  expiresInHours?: number;
+  posId?: string;
+  successUrl?: string;
+  cancelUrl?: string;
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Adresse de retour vers le site du commerçant, complétée de l'identifiant de la demande et de son
+ * statut. Ces paramètres sont INDICATIFS : le commerçant confirme toujours par l'API ou le webhook.
+ */
+export function merchantReturnUrl(r: Pick<PaymentRequestRow, 'id' | 'reference' | 'success_url' | 'cancel_url'>, status: string): string | null {
+  const base = status === 'paid' ? r.success_url : r.cancel_url;
+  if (!base) return null;
+  const u = new URL(base);
+  u.searchParams.set('vitpay_request_id', r.id);
+  u.searchParams.set('vitpay_reference', r.reference);
+  u.searchParams.set('vitpay_status', status);
+  return u.toString();
+}
+
 export interface PaymentRequestRow {
   id: string;
   org_id: string;
@@ -35,6 +64,10 @@ export interface PaymentRequestRow {
   description: string | null;
   customer_name: string | null;
   customer_contact: string | null;
+  customer_email?: string | null;
+  success_url?: string | null;
+  cancel_url?: string | null;
+  metadata?: Record<string, string> | null;
   mode: ProviderMode;
   status: PaymentRequestStatus;
   expires_at: Date;
@@ -102,9 +135,29 @@ export class PaymentsService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  private async merchantRefOf(tx: Tx, requestId: string): Promise<string | null> {
-    const r = await tx.maybeOne<{ merchant_reference: string | null }>('SELECT merchant_reference FROM payment_requests WHERE id = $1', [requestId]);
-    return r?.merchant_reference ?? null;
+  /** Champs du commerçant recopiés dans les webhooks de paiement (rattachement à sa facture). */
+  private async merchantFieldsOf(tx: Tx, requestId: string): Promise<{ merchantReference: string | null; metadata: Record<string, string> }> {
+    const r = await tx.maybeOne<{ merchant_reference: string | null; metadata: Record<string, string> | null }>(
+      'SELECT merchant_reference, metadata FROM payment_requests WHERE id = $1',
+      [requestId],
+    );
+    return { merchantReference: r?.merchant_reference ?? null, metadata: r?.metadata ?? {} };
+  }
+
+  /** URL de retour : HTTPS obligatoire hors environnement local, sans identifiants ni fragment. */
+  private checkReturnUrl(field: string, value: string | undefined): string | null {
+    if (value === undefined || value === '') return null;
+    let u: URL;
+    try {
+      u = new URL(value);
+    } catch {
+      throw Errors.validation({ [field]: 'Must be an absolute URL' });
+    }
+    const httpAllowed = this.config.appEnv === 'local';
+    if (u.protocol !== 'https:' && !(httpAllowed && u.protocol === 'http:')) throw Errors.validation({ [field]: 'Must use HTTPS' });
+    if (u.username || u.password) throw Errors.validation({ [field]: 'Must not contain credentials' });
+    if (u.hash) throw Errors.validation({ [field]: 'Must not contain a fragment (#)' });
+    return u.toString();
   }
 
   payUrl(token: string): string {
@@ -116,7 +169,7 @@ export class PaymentsService {
   async createRequest(
     orgId: string,
     actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null },
-    input: { amount: string; currency: string; merchantReference?: string; description?: string; customerName?: string; customerContact?: string; expiresInHours?: number; posId?: string },
+    input: CreateRequestInput,
   ) {
     if (!isCurrency(input.currency)) throw Errors.validation({ currency: 'Unsupported currency' });
     let amount: Money;
@@ -127,9 +180,10 @@ export class PaymentsService {
     }
     if (!amount.isPositive()) throw Errors.validation({ amount: 'Amount must be positive' });
     const ttl = Math.min(input.expiresInHours ?? this.config.PAYMENT_REQUEST_DEFAULT_TTL_HOURS, MAX_TTL_HOURS);
+    const checked = { ...input, successUrl: this.checkReturnUrl('successUrl', input.successUrl), cancelUrl: this.checkReturnUrl('cancelUrl', input.cancelUrl) };
 
     try {
-      return await this.createRequestTx(orgId, actor, input, amount, ttl);
+      return await this.createRequestTx(orgId, actor, checked, amount, ttl);
     } catch (e) {
       // Deux créations simultanées avec la même référence : l'index unique tranche.
       if (isUniqueViolation(e, 'payment_requests_merchant_ref_uq')) {
@@ -142,7 +196,7 @@ export class PaymentsService {
   private async createRequestTx(
     orgId: string,
     actor: { userId: string; ip: string | null; userAgent: string | null; apiKeyId?: string | null },
-    input: { merchantReference?: string; description?: string; customerName?: string; customerContact?: string; posId?: string },
+    input: Omit<CreateRequestInput, 'successUrl' | 'cancelUrl'> & { successUrl: string | null; cancelUrl: string | null },
     amount: Money,
     ttl: number,
   ) {
@@ -163,8 +217,8 @@ export class PaymentsService {
       }
       const row = await tx.one<PaymentRequestRow>(
         `INSERT INTO payment_requests (org_id, pos_id, created_by, reference, public_token, amount_minor, currency, description,
-            customer_name, customer_contact, mode, status, expires_at, merchant_reference)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open', now() + make_interval(hours => $12), $13) RETURNING *`,
+            customer_name, customer_contact, mode, status, expires_at, merchant_reference, success_url, cancel_url, customer_email, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open', now() + make_interval(hours => $12), $13, $14, $15, $16, $17) RETURNING *`,
         [
           orgId,
           input.posId ?? null,
@@ -179,6 +233,10 @@ export class PaymentsService {
           mode,
           ttl,
           input.merchantReference ?? null,
+          input.successUrl,
+          input.cancelUrl,
+          input.customerEmail?.toLowerCase() ?? null,
+          JSON.stringify(input.metadata ?? {}),
         ],
       );
       await this.audit.record(tx, {
@@ -226,6 +284,10 @@ export class PaymentsService {
       description: r.description,
       customerName: r.customer_name,
       customerContact: r.customer_contact,
+      customerEmail: r.customer_email ?? null,
+      successUrl: r.success_url ?? null,
+      cancelUrl: r.cancel_url ?? null,
+      metadata: r.metadata ?? {},
       mode: r.mode,
       status: r.status,
       posId: r.pos_id,
@@ -406,6 +468,7 @@ export class PaymentsService {
       paidAt: r.paid_at?.toISOString() ?? null,
       methods,
       latestAttempt: latest ? { status: latest.status, failureCode: latest.failure_code } : null,
+      returnUrl: merchantReturnUrl(r, expired ? 'expired' : r.status),
     };
   }
 
@@ -684,7 +747,7 @@ export class PaymentsService {
           aggregateType: 'payment_attempt',
           aggregateId: attempt.id,
           orgId,
-          payload: { requestId: attempt.payment_request_id, merchantReference: await this.merchantRefOf(tx, attempt.payment_request_id), amount: expected.toJSON() },
+          payload: { requestId: attempt.payment_request_id, ...(await this.merchantFieldsOf(tx, attempt.payment_request_id)), amount: expected.toJSON() },
         });
       } else if (to === 'failed' || to === 'cancelled' || to === 'expired') {
         await this.outbox.publish(tx, {
@@ -692,7 +755,7 @@ export class PaymentsService {
           aggregateType: 'payment_attempt',
           aggregateId: attempt.id,
           orgId,
-          payload: { requestId: attempt.payment_request_id, merchantReference: await this.merchantRefOf(tx, attempt.payment_request_id), status: to, failureCode: payment.failureCode ?? null },
+          payload: { requestId: attempt.payment_request_id, ...(await this.merchantFieldsOf(tx, attempt.payment_request_id)), status: to, failureCode: payment.failureCode ?? null },
         });
       }
     });
