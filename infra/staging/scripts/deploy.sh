@@ -12,7 +12,7 @@ echo "3/5 Construction des images"; docker compose build --pull
 echo "4/5 Migration puis démarrage"; docker compose up -d --remove-orphans
 # Le Caddyfile est monté fichier par fichier : après un checkout, le conteneur voit encore l'ancien.
 docker compose restart caddy >/dev/null
-for _ in $(seq 1 90); do docker compose ps api | grep -q "Up" && break; sleep 2; done
+for _ in $(seq 1 90); do docker compose ps api | grep -q "(healthy)" && break; sleep 2; done
 # Premier démarrage : Caddy obtient les certificats en quelques secondes ; attendre le HTTPS.
 S="$(grep '^STAGING_DOMAIN_SUFFIX=' .env | cut -d= -f2)$(grep '^STAGING_URL_PORT=' .env | cut -d= -f2)"
 for h in api. pay. app. admin. ''; do  # un certificat par nom (dont l'adresse nue) : attendre chacun (tout code HTTP = TLS établi)
