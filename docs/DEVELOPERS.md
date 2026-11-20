@@ -1,5 +1,7 @@
 # VITPAY — Guide d'intégration (API publique Business)
 
+> Version publique : https://vitpay-ma.com/developpeurs.html · Spécification : [`openapi.json`](openapi.json) (OpenAPI 3.0, vérifiée contre l'API par `apps/api/test/openapi-contract.test.ts`).
+
 Intégrez VITPAY à votre site ou à votre logiciel : créez des demandes de paiement, redirigez vos clients vers la page de paiement et recevez les confirmations par webhook.
 
 > **Sandbox.** Tant que la validation juridique n'est pas finalisée, seuls les paiements de test (prestataire simulé) sont possibles.

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Développeurs — API et intégration — VitPay</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230e5a3a'/%3E%3Ctext x='16' y='22' font-family='Arial' font-weight='700' font-size='17' fill='white' text-anchor='middle'%3EV%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="/"><span class="logo-mark">V</span>VitPay</a>
+    <nav class="nav" aria-label="Navigation principale">
+      <a href="/#fonctionnalites">Fonctionnalités</a>
+      <a href="/developpeurs.html">Développeurs</a>
+    </nav>
+    <a class="btn" href="/#contact">Contact</a>
+  </div>
+</header>
+<main class="doc wide">
+  <h1>Développeurs</h1>
+  <p class="updated">Intégrez l’encaissement VitPay à votre site ou à votre logiciel · API v1 · mise à jour le 21 novembre 2026</p>
+
+  <p>VitPay vous donne une seule API pour encaisser vos clients par carte : demandes de paiement, page de paiement hébergée, webhooks signés, remboursements et reçus. Les paiements sont exécutés par <strong>votre propre compte</strong> chez un prestataire de paiement agréé, qui vous verse directement les fonds.</p>
+
+  <p class="note">Phase pilote : seul le mode test est ouvert. Les clés réelles seront proposées à l’ouverture des paiements réels. <a href="mailto:contact@vitpay-ma.com?subject=Acc%C3%A8s%20d%C3%A9veloppeur%20VitPay">Demander un accès développeur</a>.</p>
+
+  <nav class="toc" aria-label="Sommaire">
+    <strong>Sommaire</strong>
+    <ol>
+      <li><a href="#demarrage">Démarrage rapide</a></li>
+      <li><a href="#cles">Clés API, mode test et réel</a></li>
+      <li><a href="#creer">Créer une demande de paiement</a></li>
+      <li><a href="#retour">Retour du client sur votre site</a></li>
+      <li><a href="#webhooks">Webhooks</a></li>
+      <li><a href="#sdk">Kit Node.js</a></li>
+      <li><a href="#tests">Tester vos paiements</a></li>
+      <li><a href="#idempotence">Idempotence et nouvelles tentatives</a></li>
+      <li><a href="#erreurs">Erreurs</a></li>
+      <li><a href="#reference">Référence de l’API</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="demarrage">1. Démarrage rapide</h2>
+  <ol>
+    <li>Dans <strong>Business → Paramètres</strong>, connectez votre compte de test chez votre prestataire de paiement.</li>
+    <li>Dans <strong>Business → Développeurs</strong>, notez l’identifiant de votre organisation et créez une clé <strong>Test</strong> (<code>vp_sk_test_…</code>). Elle n’est affichée qu’une fois.</li>
+    <li>Créez une demande de paiement, puis redirigez votre client vers <code>payUrl</code>.</li>
+    <li>Recevez la confirmation par webhook <code>payment.succeeded</code>, puis livrez ou activez le service.</li>
+  </ol>
+  <table>
+    <tr><td>Adresse de l’API (staging)</td><td><code>https://api.staging.vitpay-ma.com</code></td></tr>
+    <tr><td>Adresse de l’API (production)</td><td>communiquée à l’ouverture des paiements réels</td></tr>
+    <tr><td>Format</td><td>JSON, montants en chaîne décimale (<code>"149.90"</code>), dates ISO 8601 UTC</td></tr>
+    <tr><td>Spécification</td><td><a href="/openapi.json">openapi.json</a> (OpenAPI 3.0), à importer dans Postman, Insomnia ou un générateur de client</td></tr>
+  </table>
+
+  <h2 id="cles">2. Clés API, mode test et réel</h2>
+  <pre><code>Authorization: Bearer vp_sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code></pre>
+  <div class="scroll"><table>
+    <tr><th>Clé</th><th>Demandes créées</th><th>Ce que la clé peut lire</th></tr>
+    <tr><td><code>vp_sk_test_…</code></td><td>Test (sandbox), aucun débit réel</td><td>Uniquement les demandes de test</td></tr>
+    <tr><td><code>vp_sk_live_…</code></td><td>Réelles, sur votre compte prestataire réel</td><td>Uniquement les demandes réelles</td></tr>
+  </table></div>
+  <ul>
+    <li>Pour passer en réel, vous changez seulement la clé : le code reste le même.</li>
+    <li>Une demande de l’autre mode répond <code>404</code>.</li>
+    <li>Chaque clé a des <strong>périmètres</strong> : <code>requests:create</code>, <code>requests:read</code>, <code>requests:cancel</code>, <code>refunds:create</code>. N’accordez que le nécessaire.</li>
+    <li>Une clé s’utilise <strong>côté serveur uniquement</strong>, jamais dans un navigateur ni une application mobile. Révoquez-la immédiatement en cas de fuite.</li>
+  </ul>
+
+  <h2 id="creer">3. Créer une demande de paiement</h2>
+  <pre><code>curl -X POST "https://api.staging.vitpay-ma.com/v1/orgs/$ORG_ID/payment-requests" \
+  -H "Authorization: Bearer $VITPAY_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: facture-INV-2026-0042" \
+  -d '{
+    "amount": "199.00",
+    "currency": "MAD",
+    "description": "Abonnement Pro – décembre",
+    "merchantReference": "INV-2026-0042",
+    "customerEmail": "client@exemple.ma",
+    "successUrl": "https://app.exemple.ma/facturation/merci",
+    "cancelUrl": "https://app.exemple.ma/facturation",
+    "metadata": { "invoiceId": "INV-2026-0042", "customerId": "cus_81" }
+  }'</code></pre>
+  <p>La réponse <code>201</code> contient notamment <code>id</code>, <code>reference</code>, <code>status: "open"</code>, <code>mode</code> et <strong><code>payUrl</code></strong>. Redirigez votre client vers cette adresse, ou affichez-la en QR code (<code>GET …/payment-requests/{id}/qr.svg</code>).</p>
+  <div class="scroll"><table>
+    <tr><th>Champ</th><th>Rôle</th></tr>
+    <tr><td><code>amount</code></td><td>Obligatoire. Chaîne décimale, jamais un nombre flottant.</td></tr>
+    <tr><td><code>merchantReference</code></td><td>Votre n° de commande ou de facture, unique dans votre organisation.</td></tr>
+    <tr><td><code>successUrl</code>, <code>cancelUrl</code></td><td>Retour du client sur votre site (voir <a href="#retour">section 4</a>).</td></tr>
+    <tr><td><code>customerEmail</code></td><td>Visible par vous seulement, jamais sur la page de paiement.</td></tr>
+    <tr><td><code>metadata</code></td><td>Jusqu’à 20 paires clé/valeur texte, renvoyées dans les webhooks.</td></tr>
+    <tr><td><code>expiresInHours</code></td><td>Durée de validité du lien, de 1 à 720 heures.</td></tr>
+  </table></div>
+
+  <h2 id="retour">4. Retour du client sur votre site</h2>
+  <p>Après un paiement confirmé, le client est renvoyé automatiquement vers <code>successUrl</code>. S’il abandonne, ou si la demande a expiré ou été annulée, il peut revenir vers <code>cancelUrl</code>. VitPay ajoute à l’adresse :</p>
+  <pre><code>https://app.exemple.ma/facturation/merci?vitpay_request_id=…&amp;vitpay_reference=VP-…&amp;vitpay_status=paid</code></pre>
+  <p class="note">Ces paramètres sont <strong>indicatifs</strong> : n’importe qui peut saisir cette adresse. N’activez jamais un service sur la seule foi de l’URL de retour. Confirmez avec le webhook, ou relisez la demande avec <code>GET …/payment-requests/{vitpay_request_id}</code> et vérifiez <code>status: "paid"</code>.</p>
+  <p>Règles : adresse absolue en HTTPS, sans identifiants (<code>user:pass@</code>) ni fragment (<code>#</code>), 2048 caractères au plus.</p>
+
+  <h2 id="webhooks">5. Webhooks</h2>
+  <p>Dans <strong>Business → Développeurs → Webhooks</strong>, ajoutez une adresse HTTPS et choisissez les événements : <code>payment.succeeded</code>, <code>payment.failed</code>, <code>refund.succeeded</code>, <code>refund.failed</code>, <code>dispute.opened</code>, <code>dispute.won</code>, <code>dispute.lost</code>. Le secret de signature <code>whsec_…</code> n’est affiché qu’une fois.</p>
+  <pre><code>POST /webhooks/vitpay
+Content-Type: application/json
+VitPay-Event-Id: evt_123
+VitPay-Signature: t=1763700000,v1=5f2b…
+
+{"id":"evt_123","type":"payment.succeeded","created":"2026-11-21T09:00:00.000Z","livemode":false,
+ "data":{"objectType":"payment_attempt","objectId":"…","requestId":"…","merchantReference":"INV-2026-0042",
+         "metadata":{"invoiceId":"INV-2026-0042"},"amount":{"amount":"19900","currency":"MAD"}}}</code></pre>
+  <p><strong>Vérifier la signature.</strong> Elle se vérifie sur le <strong>corps brut</strong>, avant tout parsing JSON. La signature <code>v1</code> est le HMAC-SHA256, en hexadécimal, de <code>t + "." + corps</code>, calculé avec votre secret. Pendant un changement de secret, l’en-tête contient <strong>plusieurs</strong> <code>v1</code> : une seule doit correspondre.</p>
+  <pre><code>import crypto from 'node:crypto';
+
+export function verifyVitpay(rawBody, header, secret, toleranceSec = 300) {
+  const parts = header.split(',').map((p) =&gt; p.split('='));
+  const t = parts.find(([k]) =&gt; k === 't')?.[1];
+  const signatures = parts.filter(([k]) =&gt; k === 'v1').map(([, v]) =&gt; v);
+  if (!t || Math.abs(Date.now() / 1000 - Number(t)) &gt; toleranceSec) return false; // anti-rejeu
+  const expected = crypto.createHmac('sha256', secret).update(`${t}.${rawBody}`).digest();
+  return signatures.some((v1) =&gt; {
+    const got = Buffer.from(v1, 'hex');
+    return got.length === expected.length &amp;&amp; crypto.timingSafeEqual(expected, got);
+  });
+}</code></pre>
+  <ul>
+    <li>Répondez <code>2xx</code> rapidement, puis traitez le message de façon asynchrone.</li>
+    <li>La livraison est garantie <strong>au moins une fois</strong> : dédupliquez sur <code>VitPay-Event-Id</code>.</li>
+    <li><code>livemode</code> indique un paiement réel. Ignorez les événements de test dans votre environnement de production.</li>
+    <li>En cas d’échec, VitPay réessaie avec un délai croissant, jusqu’à 10 tentatives. Les redirections ne sont pas suivies.</li>
+    <li>Le bouton <strong>Tester</strong> envoie un événement <code>test</code>.</li>
+  </ul>
+
+  <h2 id="sdk">6. Kit Node.js</h2>
+  <p>Le kit <code>@vitpay/node</code> (Node 18 ou plus récent, sans dépendance) gère l’authentification, l’idempotence, les nouvelles tentatives, les erreurs typées et la vérification des webhooks. Il est fourni aux intégrateurs pilotes pendant la phase pilote.</p>
+  <pre><code>import { VitPay } from '@vitpay/node';
+
+const vitpay = new VitPay({
+  apiKey: process.env.VITPAY_SECRET_KEY,
+  orgId: process.env.VITPAY_ORG_ID,
+  baseUrl: 'https://api.staging.vitpay-ma.com',
+});
+
+// Encaisser une facture
+const r = await vitpay.paymentRequests.create(
+  { amount: '199.00', merchantReference: invoice.number, successUrl, cancelUrl, metadata: { invoiceId: invoice.id } },
+  { idempotencyKey: `facture-${invoice.id}` },
+);
+res.redirect(303, r.payUrl);
+
+// Webhook (corps brut, par ex. express.raw({ type: 'application/json' }))
+const event = vitpay.webhooks.constructEvent(req.body, req.headers['vitpay-signature'], process.env.VITPAY_WEBHOOK_SECRET);
+if (event.type === 'payment.succeeded') await markInvoicePaid(event.data.metadata.invoiceId, event.id);</code></pre>
+
+  <h2 id="tests">7. Tester vos paiements</h2>
+  <p>Avec une clé de test, aucun montant réel n’est débité.</p>
+  <ul>
+    <li><strong>Prestataire simulé</strong> (staging) : la page de paiement propose des boutons pour obtenir un paiement accepté, refusé, abandonné, en attente ou avec authentification 3-D Secure.</li>
+    <li><strong>YouCan Pay en mode test</strong> : utilisez les cartes de test du prestataire.</li>
+  </ul>
+  <div class="scroll"><table>
+    <tr><th>Carte de test YouCan Pay</th><th>Résultat</th></tr>
+    <tr><td><code>4242 4242 4242 4242</code></td><td>Paiement accepté</td></tr>
+    <tr><td><code>4000 0000 0000 3220</code></td><td>Authentification 3-D Secure, puis paiement accepté</td></tr>
+    <tr><td><code>4000 0000 0000 0077</code></td><td>Refusé (provision insuffisante)</td></tr>
+    <tr><td><code>4000 0084 0000 1629</code></td><td>Authentification 3-D Secure, puis refus</td></tr>
+  </table></div>
+  <p>Pour la date d’expiration et le cryptogramme, suivez la documentation de test du prestataire.</p>
+
+  <h2 id="idempotence">8. Idempotence et nouvelles tentatives</h2>
+  <ul>
+    <li>L’en-tête <code>Idempotency-Key</code> (8 à 128 caractères <code>A-Z a-z 0-9 _ - : .</code>) est <strong>obligatoire</strong> pour créer une demande ou un remboursement.</li>
+    <li>Rejouer la même requête avec la même clé renvoie la même réponse, avec l’en-tête <code>Idempotent-Replayed: true</code>. En cas de coupure réseau, réessayez donc sans risque de doublon.</li>
+    <li>Choisissez une clé stable de votre côté, par exemple <code>facture-INV-2026-0042</code>.</li>
+    <li>La même clé avec un corps différent répond <code>422</code>.</li>
+  </ul>
+
+  <h2 id="erreurs">9. Erreurs</h2>
+  <p>Les erreurs suivent le format <code>application/problem+json</code> (RFC 9457) : <code>title</code>, <code>status</code>, <code>code</code>, <code>requestId</code> (à communiquer au support) et <code>details</code> s’il y a lieu.</p>
+  <div class="scroll"><table>
+    <tr><th>Statut</th><th>Codes</th><th>Signification</th></tr>
+    <tr><td>400</td><td><code>idempotency_key_required</code>, <code>idempotency_key_invalid</code></td><td>En-tête d’idempotence absent ou mal formé</td></tr>
+    <tr><td>401</td><td><code>unauthorized</code></td><td>Clé absente, invalide ou révoquée</td></tr>
+    <tr><td>403</td><td><code>forbidden</code></td><td>Périmètre insuffisant ou organisation suspendue</td></tr>
+    <tr><td>404</td><td><code>not_found</code></td><td>Introuvable, ou objet de l’autre mode</td></tr>
+    <tr><td>409</td><td><code>invalid_state</code>, <code>merchant_reference_exists</code>, <code>idempotency_in_progress</code>, <code>attempt_in_progress</code></td><td>Opération incompatible avec l’état actuel</td></tr>
+    <tr><td>422</td><td><code>validation_error</code></td><td>Champ invalide (détail dans <code>details</code>)</td></tr>
+    <tr><td>429</td><td><code>too_many_requests</code></td><td>Trop de requêtes : réessayez plus tard</td></tr>
+    <tr><td>502</td><td><code>provider_error</code></td><td>Le prestataire de paiement n’a pas répondu correctement</td></tr>
+  </table></div>
+
+  <h2 id="reference">10. Référence de l’API</h2>
+  <p>Toutes les adresses commencent par <code>/v1/orgs/{orgId}</code>. Le détail des champs se trouve dans <a href="/openapi.json">openapi.json</a>.</p>
+  <div class="scroll"><table class="ref">
+    <tr><th>Requête</th><th>Périmètre</th><th>Rôle</th></tr>
+    <tr><td>POST /payment-requests</td><td><code>requests:create</code></td><td>Créer une demande de paiement</td></tr>
+    <tr><td>GET /payment-requests</td><td><code>requests:read</code></td><td>Lister (filtres <code>status</code>, <code>q</code>, <code>merchantReference</code> ; curseur <code>before</code>, <code>limit</code> ≤ 100)</td></tr>
+    <tr><td>GET /payment-requests/{id}</td><td><code>requests:read</code></td><td>Détail : tentatives, remboursements, litiges, reçu</td></tr>
+    <tr><td>GET /payment-requests/{id}/qr.svg</td><td><code>requests:read</code></td><td>QR code du lien de paiement</td></tr>
+    <tr><td>POST /payment-requests/{id}/cancel</td><td><code>requests:cancel</code></td><td>Annuler une demande ouverte</td></tr>
+    <tr><td>POST /refunds</td><td><code>refunds:create</code></td><td>Rembourser tout ou partie d’un paiement</td></tr>
+    <tr><td>GET /payments/{attemptId}/receipt.pdf</td><td><code>requests:read</code></td><td>Reçu PDF d’un paiement réussi</td></tr>
+  </table></div>
+
+  <h2>Assistance</h2>
+  <p>Une question d’intégration : <a href="mailto:contact@vitpay-ma.com?subject=Int%C3%A9gration%20API%20VitPay">contact@vitpay-ma.com</a>. Indiquez le <code>requestId</code> de l’erreur, ou l’<code>id</code> de la demande concernée.</p>
+</main>
+<footer>
+  <div class="wrap">
+    <div>
+      <strong class="w">VitPay</strong> est un produit de VIT GLOBAL TECHNOLOGIES GROUP SARLAU<br>
+      RC Casablanca 742851 · ICE 004013219000041<br>
+      © 2026 VIT GLOBAL TECHNOLOGIES GROUP
+    </div>
+    <nav class="links" aria-label="Informations légales">
+      <a href="/developpeurs.html">Développeurs</a>
+      <a href="/mentions-legales.html">Mentions légales</a>
+      <a href="/conditions.html">Conditions générales</a>
+      <a href="/remboursement.html">Remboursement</a>
+      <a href="/confidentialite.html">Confidentialité</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>
