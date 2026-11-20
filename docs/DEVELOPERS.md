@@ -33,6 +33,16 @@ Règles d'utilisation :
 - La révocation prend effet immédiatement.
 - Côté serveur uniquement : ne mettez **jamais** une clé dans une application mobile ou du JavaScript côté navigateur.
 
+## Kit Node.js
+
+Le kit [`@vitpay/node`](../packages/sdk-node/README.md) fait tout cela pour vous : appels signés, idempotence, nouvelles tentatives, erreurs typées et vérification des webhooks (rotation incluse).
+
+```js
+const vitpay = new VitPay({ apiKey: process.env.VITPAY_SECRET_KEY, orgId: process.env.VITPAY_ORG_ID, baseUrl: process.env.VITPAY_API_URL });
+const r = await vitpay.paymentRequests.create({ amount: '199.00', successUrl, metadata: { invoiceId } }, { idempotencyKey: `facture-${invoiceId}` });
+const event = vitpay.webhooks.constructEvent(rawBody, req.headers['vitpay-signature'], process.env.VITPAY_WEBHOOK_SECRET);
+```
+
 ## 2. Créer une demande de paiement
 
 ```bash
