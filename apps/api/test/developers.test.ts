@@ -1,0 +1,208 @@
+import { createServer, IncomingMessage, Server } from 'node:http';
+import { AddressInfo } from 'node:net';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { hmacSha256Hex } from '../src/common/crypto';
+import { isPrivateAddress, validateWebhookUrl } from '../src/common/safe-http';
+import { DevelopersService } from '../src/modules/developers/developers.service';
+import { connectMock, idemKey, login, ownerQuery, payerActs, registerMerchant, resetDb, Session, startApp, TestCtx, tokenOf } from './helpers';
+
+interface Received {
+  headers: IncomingMessage['headers'];
+  body: string;
+}
+
+function receiver(status = 200): Promise<{ server: Server; url: string; received: Received[] }> {
+  const received: Received[] = [];
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      received.push({ headers: req.headers, body });
+      res.statusCode = status;
+      res.end('ok');
+    });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook`, received })));
+}
+
+describe('API publique : clés API et webhooks sortants', () => {
+  let ctx: TestCtx;
+  let s: Session;
+  let orgId: string;
+  let dev: DevelopersService;
+
+  beforeAll(async () => {
+    await resetDb();
+    ctx = await startApp();
+    dev = ctx.app.get(DevelopersService);
+    ({ s, orgId } = await registerMerchant(ctx, 'dev@dev.test', 'Boutique API'));
+    await connectMock(s, orgId);
+  });
+  afterAll(async () => ctx.close());
+
+  const bearer = (key: string) => ({
+    get: (p: string) => ctx.api().get(p).set('Authorization', `Bearer ${key}`),
+    post: (p: string, body: object, h: Record<string, string> = {}) => ctx.api().post(p).set('Authorization', `Bearer ${key}`).set(h).send(body),
+  });
+
+  it('clé API : affichée une fois, stockée hachée, limitée à ses périmètres et à son organisation', async () => {
+    const created = await s.post(`/v1/orgs/${orgId}/developers/api-keys`, { name: 'Site e-commerce', scopes: ['requests:create', 'requests:read'] });
+    expect(created.status).toBe(201);
+    const key = created.body.secret as string;
+    expect(key).toMatch(/^vp_sk_/);
+    const list = await s.get(`/v1/orgs/${orgId}/developers/api-keys`);
+    expect(JSON.stringify(list.body)).not.toContain(key);
+    const stored = await ownerQuery<{ key_hash: Buffer }>(`SELECT key_hash FROM api_keys WHERE id = $1`, [created.body.id]);
+    expect(stored[0]?.key_hash.toString('utf8')).not.toContain('vp_sk_');
+
+    const api = bearer(key);
+    const req = await api.post(`/v1/orgs/${orgId}/payment-requests`, { amount: '149.90', currency: 'MAD', description: 'Commande #1042' }, { 'Idempotency-Key': idemKey() });
+    expect(req.status).toBe(201);
+    expect((await api.get(`/v1/orgs/${orgId}/payment-requests/${req.body.id}`)).status).toBe(200);
+    // Audit : action attribuée à la clé API
+    const audit = await ownerQuery<{ actor_type: string; metadata: { apiKeyId: string } }>(
+      `SELECT actor_type, metadata FROM audit_log WHERE action = 'payment_request.created' AND target_id = $1`,
+      [req.body.id],
+    );
+    expect(audit[0]).toMatchObject({ actor_type: 'api_key', metadata: { apiKeyId: created.body.id } });
+
+    // Hors périmètre
+    expect((await api.post(`/v1/orgs/${orgId}/refunds`, { attemptId: '00000000-0000-4000-8000-000000000000', reason: 'x' }, { 'Idempotency-Key': idemKey() })).status).toBe(403);
+    expect((await api.get(`/v1/orgs/${orgId}/developers/api-keys`)).status).toBe(403); // une clé ne gère pas les clés
+    expect((await api.get('/v1/auth/me')).status).toBe(403);
+    expect((await api.get('/v1/admin/dashboard')).status).toBe(401);
+    const other = await registerMerchant(ctx, 'other@dev.test');
+    expect((await api.get(`/v1/orgs/${other.orgId}/payment-requests`)).status).toBe(404);
+
+    // Revue n°2 : une clé ne survit pas au retrait de son créateur
+    const { s: s2, orgId: org2 } = await registerMerchant(ctx, 'owner2@dev.test', 'Org Deux');
+    await registerMerchant(ctx, 'admin2@dev.test', 'Perso');
+    await s2.post(`/v1/orgs/${org2}/members`, { email: 'admin2@dev.test', role: 'admin' });
+    const admin2 = (await login(ctx, 'admin2@dev.test')).s;
+    const k2 = (await admin2.post(`/v1/orgs/${org2}/developers/api-keys`, { name: 'clé admin', scopes: ['requests:read'] })).body.secret;
+    expect((await bearer(k2).get(`/v1/orgs/${org2}/payment-requests`)).status).toBe(200);
+    const admin2Id = (await admin2.get('/v1/auth/me')).body.user.id;
+    await ctx.api().delete(`/v1/orgs/${org2}/members/${admin2Id}`).set('Cookie', s2.cookie).set('x-vitpay-csrf', '1');
+    expect((await bearer(k2).get(`/v1/orgs/${org2}/payment-requests`)).status).toBe(401);
+
+    // Révocation immédiate
+    await ctx.api().delete(`/v1/orgs/${orgId}/developers/api-keys/${created.body.id}`).set('Cookie', s.cookie).set('x-vitpay-csrf', '1');
+    expect((await api.get(`/v1/orgs/${orgId}/payment-requests`)).status).toBe(401);
+    expect((await bearer('vp_sk_' + 'x'.repeat(43)).get(`/v1/orgs/${orgId}/payment-requests`)).status).toBe(401);
+  });
+
+  it('webhook sortant : paiement confirmé livré, signé HMAC, une seule fois', async () => {
+    const r = await receiver(200);
+    try {
+      const ep = await s.post(`/v1/orgs/${orgId}/developers/webhooks`, { url: r.url, events: ['payment.succeeded'] });
+      expect(ep.status).toBe(201);
+      const secret = ep.body.secret as string;
+      const k = (await s.post(`/v1/orgs/${orgId}/developers/api-keys`, { name: 'k2', scopes: ['requests:create'] })).body.secret;
+      const pr = await bearer(k).post(`/v1/orgs/${orgId}/payment-requests`, { amount: '75', currency: 'MAD' }, { 'Idempotency-Key': idemKey() });
+      await payerActs(ctx, tokenOf(pr.body.payUrl), 'succeed');
+      await ctx.outbox.processBatch();
+      await ctx.outbox.processBatch(); // rejeu : aucun doublon
+      await dev.deliverDue();
+      await dev.deliverDue();
+      expect(r.received).toHaveLength(1);
+      const got = r.received[0] as Received;
+      const sig = String(got.headers['vitpay-signature']);
+      const [, ts, v1] = /t=(\d+),v1=([0-9a-f]+)/.exec(sig) ?? [];
+      expect(hmacSha256Hex(secret, `${ts}.${got.body}`)).toBe(v1);
+      const evt = JSON.parse(got.body);
+      expect(evt).toMatchObject({ type: 'payment.succeeded', data: { requestId: pr.body.id, amount: { amount: '7500', currency: 'MAD' } } });
+      expect(got.headers['vitpay-event-id']).toBe(evt.id);
+    } finally {
+      r.server.close();
+    }
+  });
+
+  it('rotation du secret : double signature pendant le recouvrement, ancien secret refusé ensuite', async () => {
+    const r = await receiver(200);
+    const sigs = (got: Received) => [...String(got.headers['vitpay-signature']).matchAll(/v1=([0-9a-f]+)/g)].map((m) => m[1]);
+    const ts = (got: Received) => /t=(\d+)/.exec(String(got.headers['vitpay-signature']))?.[1];
+    try {
+      const ep = await s.post(`/v1/orgs/${orgId}/developers/webhooks`, { url: r.url, events: ['payment.succeeded'] });
+      const oldSecret = ep.body.secret as string;
+      const rot = await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/rotate-secret`, { overlapHours: 24 });
+      expect(rot.status).toBe(200);
+      const newSecret = rot.body.secret as string;
+      expect(newSecret).toMatch(/^whsec_/);
+      expect(newSecret).not.toBe(oldSecret);
+      expect(JSON.stringify((await s.get(`/v1/orgs/${orgId}/developers/webhooks`)).body)).not.toContain(newSecret);
+
+      await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/test`);
+      await dev.deliverDue();
+      const first = r.received.at(-1) as Received;
+      expect(sigs(first)).toEqual([hmacSha256Hex(newSecret, `${ts(first)}.${first.body}`), hmacSha256Hex(oldSecret, `${ts(first)}.${first.body}`)]);
+
+      // Fin du recouvrement : seul le nouveau secret signe.
+      await ownerQuery(`UPDATE webhook_endpoints SET previous_secret_expires_at = now() - interval '1 second' WHERE id = $1`, [ep.body.id]);
+      await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/test`);
+      await dev.deliverDue();
+      const second = r.received.at(-1) as Received;
+      expect(sigs(second)).toEqual([hmacSha256Hex(newSecret, `${ts(second)}.${second.body}`)]);
+
+      // Deux rotations rapprochées : la seconde est refusée (le secret remis à la première resterait « ancien »).
+      expect((await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/rotate-secret`, { overlapHours: 24 })).status).toBe(409);
+      await ownerQuery(`UPDATE webhook_endpoints SET secret_rotated_at = now() - interval '1 minute' WHERE id = $1`, [ep.body.id]);
+      // Les anciens secrets expirés sont effacés de la base.
+      expect((await ownerQuery<{ p: string | null }>(`SELECT previous_secret_enc AS p FROM webhook_endpoints WHERE id = $1`, [ep.body.id]))[0]?.p).toBeNull();
+
+      // Rotation d'urgence (fuite) : l'ancien secret cesse immédiatement de signer.
+      const urgent = await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/rotate-secret`, { overlapHours: 0 });
+      expect(urgent.body.previousSecretExpiresAt).toBeNull();
+      await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/test`);
+      await dev.deliverDue();
+      const third = r.received.at(-1) as Received;
+      expect(sigs(third)).toEqual([hmacSha256Hex(urgent.body.secret, `${ts(third)}.${third.body}`)]);
+      const audit = await ownerQuery(`SELECT 1 FROM audit_log WHERE action = 'developers.webhook_secret_rotated' AND target_id = $1`, [ep.body.id]);
+      expect(audit).toHaveLength(2);
+    } finally {
+      r.server.close();
+    }
+  });
+
+  it('webhook en échec : nouvelle tentative programmée', async () => {
+    const r = await receiver(500);
+    try {
+      const ep = await s.post(`/v1/orgs/${orgId}/developers/webhooks`, { url: r.url, events: ['payment.succeeded'] });
+      await s.post(`/v1/orgs/${orgId}/developers/webhooks/${ep.body.id}/test`);
+      await dev.deliverDue();
+      const d = await ownerQuery<{ status: string; attempts: number; last_status_code: number }>(`SELECT status, attempts, last_status_code FROM webhook_deliveries WHERE endpoint_id = $1`, [ep.body.id]);
+      expect(d[0]).toMatchObject({ status: 'pending', attempts: 1, last_status_code: 500 });
+    } finally {
+      r.server.close();
+    }
+  });
+
+  it('anti-SSRF : adresses privées refusées à l’enregistrement et à la connexion', async () => {
+    for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.10', '169.254.169.254', '::1', '::ffff:127.0.0.1', 'fd00::1']) {
+      expect(isPrivateAddress(ip), ip).toBe(true);
+    }
+    for (const ip of ['8.8.8.8', '41.248.1.1', '2001:4860:4860::8888']) expect(isPrivateAddress(ip), ip).toBe(false);
+    expect(() => validateWebhookUrl('http://example.com/hook', false)).toThrow(/HTTPS/);
+    expect(() => validateWebhookUrl('https://169.254.169.254/latest/meta-data', false)).toThrow(/Private/);
+    expect(() => validateWebhookUrl('https://user:pw@example.com', false)).toThrow(/Credentials/);
+    // Revue n°2 : formes IPv6 « déguisées » (le parseur d'URL réécrit [::ffff:127.0.0.1] en [::ffff:7f00:1])
+    for (const u of ['https://[::ffff:127.0.0.1]/', 'https://[::ffff:a9fe:a9fe]/', 'https://[64:ff9b::a9fe:a9fe]/', 'https://[::7f00:1]/', 'https://[2002:7f00:1::]/', 'https://[fec0::1]/']) {
+      expect(() => validateWebhookUrl(u, false), u).toThrow(/Private/);
+    }
+
+    // Instance « production-like » (adresses privées interdites) : un nom résolu vers 127.0.0.1 est bloqué à la connexion.
+    const strict = await startApp({ PORT: '4559', PUBLIC_API_URL: 'http://127.0.0.1:4559', ALLOW_PRIVATE_WEBHOOK_URLS: 'false' });
+    try {
+      const m = await registerMerchant(strict, 'ssrf@dev.test');
+      expect((await m.s.post(`/v1/orgs/${m.orgId}/developers/webhooks`, { url: 'http://127.0.0.1:9/x', events: ['payment.succeeded'] })).status).toBe(422);
+      const ep = await m.s.post(`/v1/orgs/${m.orgId}/developers/webhooks`, { url: 'https://localhost:8443/x', events: ['payment.succeeded'] });
+      expect(ep.status).toBe(201);
+      await m.s.post(`/v1/orgs/${m.orgId}/developers/webhooks/${ep.body.id}/test`);
+      await strict.app.get(DevelopersService).deliverDue();
+      const d = await ownerQuery<{ last_error: string }>(`SELECT last_error FROM webhook_deliveries WHERE endpoint_id = $1`, [ep.body.id]);
+      // Le commerçant ne voit qu'une catégorie (pas de message réseau brut exploitable pour cartographier).
+      expect(d[0]?.last_error).toBe('blocked_address');
+    } finally {
+      await strict.close();
+    }
+  });
+});

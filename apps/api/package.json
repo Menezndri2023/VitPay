@@ -1,0 +1,51 @@
+{
+  "name": "@vitpay/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "node --env-file-if-exists=.env --watch -r @swc-node/register src/main.ts",
+    "start": "node --env-file-if-exists=.env dist/src/main.js",
+    "migrate": "node --env-file-if-exists=.env -r @swc-node/register src/database/migrate.cli.ts",
+    "seed": "node --env-file-if-exists=.env -r @swc-node/register src/database/seed.cli.ts",
+    "test": "vitest run",
+    "keys:reencrypt": "node --env-file-if-exists=.env -r @swc-node/register src/database/reencrypt.cli.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/throttler": "^6.3.0",
+    "@node-rs/argon2": "^2.0.2",
+    "@vitpay/money": "workspace:*",
+    "cookie-parser": "^1.4.7",
+    "helmet": "^8.0.0",
+    "nodemailer": "^10.5.0",
+    "otplib": "^12.0.1",
+    "pdfkit": "^0.15.2",
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "undici": "^7.30.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@swc-node/register": "^1.10.9",
+    "@swc/core": "^1.10.0",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pdfkit": "^0.13.8",
+    "@types/pg": "^8.11.10",
+    "@types/qrcode": "^1.5.5",
+    "@types/supertest": "^6.0.2",
+    "fast-check": "^3.23.2",
+    "supertest": "^7.0.0",
+    "typescript": "^5.7.0",
+    "unplugin-swc": "^1.5.1",
+    "vitest": "^3.0.0"
+  }
+}

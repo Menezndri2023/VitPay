@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+next-env.d.ts
+.logs/
+e2e/test-results/
+.auth/
+
+# Sauvegardes de base (staging, production) : jamais versionnées
+infra/*/backups/

@@ -1,0 +1,87 @@
+# Pile complète conteneurisée en MODE SANDBOX (prestataire simulé, aucun paiement réel).
+# docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d --build
+# La configuration de production (hébergeur, secrets, TLS) dépend de la décision CNDP (docs/COMPLIANCE.md C2).
+x-api-env: &api-env
+  NODE_ENV: development # sandbox : le prestataire simulé est interdit en production
+  PORT: "4710"
+  DATABASE_URL: postgres://vitpay_app:dev_app_password_change_me@postgres:5432/vitpay
+  DATABASE_SYSTEM_URL: postgres://vitpay_system:dev_system_password_change_me@postgres:5432/vitpay
+  APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?générer avec openssl rand -base64 32}
+  APP_ENCRYPTION_KEYS_PREVIOUS: ${APP_ENCRYPTION_KEYS_PREVIOUS:-}
+  PUBLIC_API_URL: http://localhost:4710
+  PAY_BASE_URL: http://localhost:3710
+  ALLOWED_ORIGINS: http://localhost:3710,http://localhost:3711,http://localhost:3712
+  BUSINESS_APP_URL: http://localhost:3711
+  # E-mails réels via SMTP, capturés par Mailpit (http://localhost:8025)
+  EMAIL_TRANSPORT: smtp
+  SMTP_URL: smtp://mailpit:1025
+  MOCK_PSP_ENABLED: "true"
+  ALLOW_PRIVATE_WEBHOOK_URLS: "true" # sandbox locale uniquement
+  PAYMENTS_LIVE_ENABLED: "false"
+  # [R6-1] Seuls le proxy « edge » (qui écrase X-Forwarded-For) et les apps Next (qui le relaient)
+  # sont approuvés : un en-tête forgé par le client est sans effet, chaque client a son compteur.
+  TRUST_PROXY: 172.29.10.10,172.29.10.11,172.29.10.12,172.29.10.13
+
+services:
+  migrate:
+    build: { context: ., dockerfile: infra/docker/api.Dockerfile }
+    image: vitpay/api:sandbox
+    command: ["node", "dist/src/database/migrate.cli.js"]
+    environment:
+      DATABASE_OWNER_URL: postgres://vitpay_owner:dev_owner_password_change_me@postgres:5432/vitpay
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    image: vitpay/api:sandbox
+    environment:
+      <<: *api-env
+      WORKERS_ENABLED: "false"
+    # Aucun port publié : accès uniquement via le proxy « edge ».
+    networks: [default, edge]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    image: vitpay/api:sandbox
+    environment:
+      <<: *api-env
+      WORKERS_ENABLED: "true"
+      PORT: "4711"
+      # Le worker appelle le prestataire simulé, hébergé par le conteneur api.
+      PUBLIC_API_URL: http://api:4710
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  pay:
+    build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: pay } }
+    environment: { PORT: "3710" }
+    networks: { edge: { ipv4_address: 172.29.10.11 } }
+    depends_on: [api]
+
+  business:
+    build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: business } }
+    environment: { PORT: "3711" }
+    networks: { edge: { ipv4_address: 172.29.10.12 } }
+    depends_on: [api]
+
+  admin:
+    build: { context: ., dockerfile: infra/docker/web.Dockerfile, args: { APP: admin } }
+    environment: { PORT: "3712" }
+    networks: { edge: { ipv4_address: 172.29.10.13 } }
+    depends_on: [api]
+
+  # Point d'entrée unique : écrase X-Forwarded-For (adresse réelle du client).
+  edge:
+    image: nginx:1.27-alpine
+    volumes: ["./infra/edge/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    ports: ["3710:3710", "3711:3711", "3712:3712", "4710:4710"]
+    networks: { edge: { ipv4_address: 172.29.10.10 } }
+    depends_on: [api, pay, business, admin]
+
+networks:
+  # Réseau interne du proxy et des apps (adresses fixes : seules celles-ci sont approuvées par l'API,
+  # pas la passerelle ni l'hôte). Ni base ni worker.
+  edge:
+    ipam:
+      config: [{ subnet: 172.29.10.0/24 }]

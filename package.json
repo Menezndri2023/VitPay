@@ -1,0 +1,23 @@
+{
+  "name": "vitpay",
+  "private": true,
+  "description": "VITPAY — One platform. Every payment. A VIT GLOBAL TECHNOLOGIES PRODUCT.",
+  "license": "UNLICENSED",
+  "author": "VIT GLOBAL TECHNOLOGIES GROUP S.A.R.L.A.U.",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev:api": "pnpm --filter @vitpay/api dev",
+    "dev:pay": "pnpm --filter @vitpay/pay dev",
+    "dev:business": "pnpm --filter @vitpay/business dev",
+    "dev:admin": "pnpm --filter @vitpay/admin dev",
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "pnpm --filter @vitpay/api migrate",
+    "db:seed": "pnpm --filter @vitpay/api seed"
+  }
+}

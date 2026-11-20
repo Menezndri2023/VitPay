@@ -1,0 +1,9 @@
+# Règles par défaut de gitleaks, plus une exception étroite : les exemples de clé d'idempotence
+# de la documentation et des tests (références de facture fictives « facture-INV-… »), qui ne
+# sont pas des secrets. Ne jamais élargir cette liste à des préfixes de clés (vp_sk_, etc.).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Exemples de clé d'idempotence (références de facture fictives)"
+regexes = ['''^facture-INV-[0-9-]+$''']

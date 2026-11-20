@@ -1,0 +1,83 @@
+import { createHmac } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Money } from '@vitpay/money';
+import { WebhookVerificationError, type ProviderAccountContext } from './provider.interface';
+import { mapYouCanStatus, parseTransaction, YouCanPayProvider } from './youcanpay.provider';
+
+const PRI = 'pri_sandbox_00000000-test-0000-0000-000000000000';
+const account: ProviderAccountContext = {
+  accountId: 'acc',
+  orgId: 'org',
+  mode: 'sandbox',
+  credentials: { publicKey: 'pub_sandbox_x', privateKey: PRI },
+  webhookSecret: PRI,
+};
+const p = new YouCanPayProvider();
+const sign = (body: string, key = PRI) => createHmac('sha256', key).update(body).digest('hex');
+const event = (over: Record<string, unknown> = {}) =>
+  JSON.stringify({ id: 'evt_1', event_name: 'transaction.paid', sandbox: true, payload: { transaction: { id: 'tx_1', status: 1 } }, ...over });
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('YouCanPayProvider — webhooks', () => {
+  it('accepte une signature HMAC-SHA256 du corps brut (clé privée)', () => {
+    const body = event();
+    const ev = p.verifyWebhook(account, Buffer.from(body), { 'x-youcanpay-signature': sign(body) });
+    expect(ev).toMatchObject({ eventId: 'evt_1', type: 'payment.updated', objectRef: 'tx_1' });
+  });
+
+  it('refuse une signature absente, fausse ou calculée avec une autre clé', () => {
+    const body = event();
+    expect(() => p.verifyWebhook(account, Buffer.from(body), {})).toThrow(WebhookVerificationError);
+    expect(() => p.verifyWebhook(account, Buffer.from(body), { 'x-youcanpay-signature': 'deadbeef' })).toThrow(WebhookVerificationError);
+    expect(() => p.verifyWebhook(account, Buffer.from(body), { 'x-youcanpay-signature': sign(body, 'pri_autre') })).toThrow(WebhookVerificationError);
+  });
+
+  it('refuse un corps modifié après signature', () => {
+    const body = event();
+    expect(() => p.verifyWebhook(account, Buffer.from(body.replace('tx_1', 'tx_2')), { 'x-youcanpay-signature': sign(body) })).toThrow('Invalid signature');
+  });
+
+  it('refuse un événement réel sur un compte de test', () => {
+    const body = event({ sandbox: false });
+    expect(() => p.verifyWebhook(account, Buffer.from(body), { 'x-youcanpay-signature': sign(body) })).toThrow('Sandbox flag');
+  });
+
+  it('refuse un événement non pris en charge', () => {
+    const body = event({ event_name: 'refund.created' });
+    expect(() => p.verifyWebhook(account, Buffer.from(body), { 'x-youcanpay-signature': sign(body) })).toThrow('Unsupported event');
+  });
+});
+
+describe('YouCanPayProvider — transactions', () => {
+  it('lit une transaction v1 (montant en unités) et v2 (objet monétaire)', () => {
+    const v1 = parseTransaction({ id: 'tx_1', order_id: 'att', status: 1, amount: '150.00', currency: 'MAD' }, 'tx_1');
+    expect(v1.status).toBe('succeeded');
+    expect(v1.externalRef).toBe('att');
+    expect(v1.amount.equals(Money.of(15000n, 'MAD'))).toBe(true);
+    const v2 = parseTransaction({ id: 'tx_1', order_id: 'att', status: 'failed', amount: { amount: '150.00', currency: 'MAD' } }, 'tx_1');
+    expect(v2.status).toBe('failed');
+  });
+
+  it('ne confirme jamais sur un statut ou un identifiant inattendu', () => {
+    expect(() => mapYouCanStatus('refunded')).toThrow();
+    expect(() => mapYouCanStatus(7)).toThrow();
+    expect(() => parseTransaction({ id: 'tx_X', status: 1, amount: '1.00', currency: 'MAD' }, 'tx_1')).toThrow('id mismatch');
+  });
+
+  it('crée la session : montant en centimes, page hébergée YouCan Pay en sandbox', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ token: { id: 'tok_abcdef123' }, transaction_id: 'tx_9' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const s = await p.createPayment(account, { attemptId: 'att', amount: Money.of(15000n, 'MAD'), description: 'Test', returnUrl: 'https://pay.example/r/t/status', customerIp: '1.2.3.4' });
+    expect(s).toEqual({ providerRef: 'tx_9', checkoutUrl: 'https://youcanpay.com/sandbox/payment-form/tok_abcdef123?lang=fr', status: 'pending' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit & { body: string }];
+    expect(url).toBe('https://youcanpay.com/sandbox/api/tokenize');
+    expect(JSON.parse(init.body)).toMatchObject({ amount: '15000', currency: 'MAD', order_id: 'att', customer_ip: '1.2.3.4' });
+  });
+
+  it('valide le format des clés selon le mode', () => {
+    expect(() => p.validateCredentials('sandbox', { publicKey: 'pub_sandbox_a', privateKey: 'pri_sandbox_b' })).not.toThrow();
+    expect(() => p.validateCredentials('sandbox', { publicKey: 'pub_a', privateKey: 'pri_b' })).toThrow();
+    expect(() => p.validateCredentials('live', { publicKey: 'pub_sandbox_a', privateKey: 'pri_sandbox_b' })).toThrow();
+  });
+});

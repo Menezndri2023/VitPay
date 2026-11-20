@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vitpay_owner
+      POSTGRES_PASSWORD: dev_owner_password_change_me
+      POSTGRES_DB: vitpay
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vitpay_owner -d vitpay"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+volumes:
+  pgdata:
