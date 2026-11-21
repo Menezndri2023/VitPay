@@ -132,6 +132,8 @@ export interface PaymentProvider {
     idempotencyKey: string,
   ): Promise<ProviderRefund>;
   getRefund(account: ProviderAccountContext, providerRefundRef: string): Promise<ProviderRefund>;
+  /** Remboursements possibles pour un compte de ce mode (à défaut : capabilities().refunds). */
+  refundsAvailable?(mode: ProviderMode): boolean;
   getDispute(account: ProviderAccountContext, providerDisputeRef: string): Promise<ProviderDispute>;
   verifyWebhook(account: ProviderAccountContext, rawBody: Buffer, headers: Record<string, string | undefined>): VerifiedProviderEvent;
   fetchSettlementReport(account: ProviderAccountContext, date: string): Promise<SettlementReport>;

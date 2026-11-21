@@ -59,6 +59,8 @@ EMAIL_FROM='VitPay <no-reply@${DOMAIN}>'
 # Paiements réels : FERMÉS. Ouverture uniquement selon docs/PRODUCTION.md §5 (procès-verbal signé).
 PAYMENTS_LIVE_ENABLED=false
 LEGAL_SIGNOFF_REF=
+# Remboursements YouCan Pay (API v2, comptes réels) : à passer à true après le test Y4 (docs/GO_LIVE.md).
+YOUCAN_REFUNDS_ENABLED=false
 
 # Alertes de surveillance (docs/PRODUCTION.md §6) : ntfy (ex. https://ntfy.sh/<sujet-secret>) et/ou Telegram
 ALERT_NTFY_URL=

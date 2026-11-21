@@ -8,7 +8,7 @@ import { disputeClosedEntry, disputeOpenedEntry, refundSucceededEntry, vitpayFee
 import { IncidentsService } from '../platform/incidents.service';
 import { OutboxService } from '../platform/outbox.service';
 import { ProviderAccountRow, ProviderRegistry } from '../providers/provider-registry';
-import { ProviderDispute, ProviderRefund } from '../providers/provider.interface';
+import { ProviderDispute, ProviderMode, ProviderRefund } from '../providers/provider.interface';
 import { money, PaymentAttemptRow } from './payments.service';
 import { DisputeMachine, DisputeStatus, RefundMachine, RefundStatus } from './state-machines';
 
@@ -54,7 +54,8 @@ export class RefundsService {
       if (a.status !== 'succeeded') throw Errors.invalidState('Only confirmed payments can be refunded');
       const provider = this.providers.get(a.provider_code);
       const caps = provider.capabilities();
-      if (!caps.refunds) throw Errors.invalidState('This provider does not support refunds through VITPAY');
+      const accountMode = (await tx.one<{ mode: ProviderMode }>('SELECT mode FROM provider_accounts WHERE id = $1', [a.provider_account_id])).mode;
+      if (!(provider.refundsAvailable?.(accountMode) ?? caps.refunds)) throw Errors.invalidState('This provider does not support refunds through VITPAY');
       const openDispute = await tx.maybeOne("SELECT 1 FROM disputes WHERE payment_attempt_id = $1 AND status IN ('opened','evidence_submitted')", [a.id]);
       if (openDispute) throw Errors.invalidState('A dispute is open on this payment');
 
@@ -123,6 +124,40 @@ export class RefundsService {
     }
     const final = await this.db.forOrg(orgId, (tx) => tx.one<RefundRow>('SELECT * FROM refunds WHERE id = $1', [refund.id]));
     return this.view(final);
+  }
+
+  /**
+   * Remboursements « en cours » chez un prestataire qui ne les notifie pas par webhook (YouCan Pay) :
+   * relecture périodique de leur statut, au plus tôt 2 minutes après le dernier changement.
+   */
+  async refreshPending(limit = 20): Promise<number> {
+    const rows = await this.db.system((tx) =>
+      tx.query<{ id: string; provider_ref: string; provider_account_id: string }>(
+        `SELECT r.id, r.provider_ref, a.provider_account_id FROM refunds r JOIN payment_attempts a ON a.id = r.payment_attempt_id
+          WHERE r.status = 'pending' AND r.provider_ref IS NOT NULL AND r.updated_at < now() - interval '2 minutes'
+          ORDER BY r.updated_at LIMIT $1`,
+        [limit],
+      ),
+    );
+    let n = 0;
+    for (const row of rows) {
+      try {
+        const account = await this.db.system((tx) => this.providers.loadAccount(tx, row.provider_account_id));
+        const provider = this.providers.get(account.provider_code);
+        const pr = await provider.getRefund(this.providers.context(account), row.provider_ref);
+        if (pr.status === 'pending') {
+          // Toujours en cours : on repousse la prochaine relecture.
+          await this.db.system((tx) => tx.query('UPDATE refunds SET updated_at = now() WHERE id = $1', [row.id]));
+          continue;
+        }
+        await this.applyProviderRefund(account, { ...pr, externalRef: row.id }, { type: 'provider' });
+        n++;
+      } catch (e) {
+        this.logger.warn({ msg: 'pending refund refresh failed', refundId: row.id, err: (e as Error).message });
+        await this.db.system((tx) => tx.query('UPDATE refunds SET updated_at = now() WHERE id = $1', [row.id]));
+      }
+    }
+    return n;
   }
 
   async applyProviderRefund(account: ProviderAccountRow, pr: ProviderRefund, actor: AuditActor): Promise<void> {

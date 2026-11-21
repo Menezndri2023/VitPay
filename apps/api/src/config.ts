@@ -59,6 +59,11 @@ const EnvSchema = z
     /** Webhooks sortants vers des adresses privées/HTTP (développement uniquement). */
     ALLOW_PRIVATE_WEBHOOK_URLS: bool.prefault('false'),
     /**
+     * Remboursements YouCan Pay (API v2, comptes réels uniquement : la v2 refuse les clés sandbox).
+     * À activer après le test Y4 (petit paiement réel puis remboursement, docs/GO_LIVE.md).
+     */
+    YOUCAN_REFUNDS_ENABLED: bool.prefault('false'),
+    /**
      * Garde-fou réglementaire (règles absolues 10 et 18) : aucune transaction réelle
      * tant que la validation juridique n'est pas formalisée.
      */

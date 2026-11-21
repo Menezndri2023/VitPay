@@ -36,8 +36,8 @@ Réalisable maintenant. La pile est rodée localement, puis installée le jour o
 |---|---|---|
 | Y1 | Identification d'entreprise chez YouCan Pay terminée | ⛔ fondateur |
 | Y2 | Clés de **test** saisies dans le staging, paiements avec les cartes de test, vérification des 3 points ouverts (réponse de tokenisation, statuts v1, signature des webhooks) | ⛔ Y1 |
-| Y3 | Remboursements YouCan (API v2) : codés d'après la documentation officielle, testés en mode test | ☐ |
-| Y4 | Clés **réelles** : test d'un petit paiement réel sur le compte de VIT GLOBAL, puis remboursement | ⛔ Phase 3 |
+| Y3 | Remboursements YouCan (API v2) : codés d'après la documentation officielle (formulaire, statuts, relecture périodique), tests unitaires. L'API v2 refuse les clés sandbox : **activation par `YOUCAN_REFUNDS_ENABLED=true` seulement après Y4** | ◐ code prêt, désactivé |
+| Y4 | Clés **réelles** : petit paiement réel sur le compte de VIT GLOBAL, puis `YOUCAN_REFUNDS_ENABLED=true` et remboursement de ce paiement depuis VITPAY (vérifier le statut « Remboursée » et l'écriture au ledger) | ⛔ Phase 3 |
 
 En parallèle : CMI / Attijari Payment (dossier envoyé, kit d'intégration attendu) → adaptateur n°2.
 
