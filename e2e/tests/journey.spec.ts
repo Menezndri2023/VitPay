@@ -303,3 +303,31 @@ test('TPE simulé : encaissement carte présente depuis la caisse', async ({ pag
   // Confirmation en caisse (preuve serveur)
   await expect(page.getByText('Paiement confirmé')).toBeVisible({ timeout: 20_000 });
 });
+
+test('lien de paiement réutilisable : montant libre saisi par le client, puis paiement', async ({ page, context }) => {
+  const title = `Don E2E ${Date.now() % 100000}`;
+  await useMerchantSession(page);
+  await page.goto(`${BIZ}/app/links`);
+  await page.getByLabel('Intitulé (visible par le client)').fill(title);
+  await page.getByLabel('Montant libre (le client saisit le montant)').check();
+  await page.getByRole('button', { name: 'Créer le lien' }).click();
+  const linkUrl = await page.getByLabel(`Lien ${title}`).inputValue();
+  expect(linkUrl).toMatch(/\/l\/[A-Za-z0-9_-]{16,}$/);
+  await shot(page, '20-links');
+
+  const payer = await context.browser()!.newContext({ locale: 'fr-FR' });
+  const p = await payer.newPage();
+  await p.goto(linkUrl.replace(/^https?:\/\/[^/]+/, PAY));
+  await expect(p.getByRole('heading', { name: title })).toBeVisible();
+  await p.getByLabel(/Montant à payer/).fill('35,50');
+  await p.getByRole('button', { name: 'Continuer vers le paiement' }).click();
+  await expect(p).toHaveURL(/\/r\/[A-Za-z0-9_-]+$/);
+  await expect(p.locator('.vp-amount')).toContainText('35,50');
+  await p.getByRole('button', { name: 'Payer par carte bancaire' }).click();
+  await p.getByRole('button', { name: 'Payer — scénario succès' }).click();
+  await expect(p.getByText('Paiement confirmé')).toBeVisible({ timeout: 20_000 });
+  await payer.close();
+
+  await page.reload();
+  await expect(page.locator('.vp-card', { hasText: title }).getByText('1 paiement')).toBeVisible();
+});
