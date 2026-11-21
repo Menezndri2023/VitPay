@@ -2,20 +2,36 @@
 
 import { useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { api, Logo } from '@vitpay/ui';
+import { Alert, api, AppShell, Icon, LinkButton, ROLE_LABELS_FR, ToastProvider, type NavGroup } from '@vitpay/ui';
+import { LangSwitch, useT, type MsgKey } from '../i18n';
 import { OrgProvider, useOrg } from './org-context';
 
-const NAV = [
-  { href: '/app', label: 'Tableau de bord' },
-  { href: '/app/requests', label: 'Demandes' },
-  { href: '/app/requests/new', label: 'Nouvelle demande' },
-  { href: '/app/pos', label: 'Caisse (QR)' },
-  { href: '/app/notifications', label: 'Notifications' },
-  { href: '/app/developers', label: 'Développeurs' },
-  { href: '/app/settings', label: 'Paramètres' },
-];
+function nav(role: string, t: (k: MsgKey) => string): NavGroup[] {
+  const groups: NavGroup[] = [
+    {
+      items: [
+        { href: '/app', label: t('nav.dashboard'), icon: 'home', exact: true },
+        { href: '/app/requests', label: t('nav.requests'), icon: 'list' },
+        { href: '/app/links', label: t('nav.links'), icon: 'link' },
+        { href: '/app/pos', label: t('nav.pos'), icon: 'qr' },
+        { href: '/app/notifications', label: t('nav.notifications'), icon: 'bell' },
+      ],
+    },
+  ];
+  if (role === 'owner' || role === 'admin')
+    groups.push({
+      label: t('nav.config'),
+      items: [
+        { href: '/app/settings', label: t('nav.settings'), icon: 'settings' },
+        { href: '/app/developers', label: t('nav.developers'), icon: 'code' },
+      ],
+    });
+  else groups[0]!.items.push({ href: '/app/settings', label: t('nav.settings'), icon: 'settings' });
+  return groups;
+}
 
 function VerifyEmailBanner({ email }: { email: string }) {
+  const { t } = useT();
   const [state, setState] = useState<'idle' | 'sent' | 'error'>('idle');
   const resend = async () => {
     try {
@@ -26,18 +42,18 @@ function VerifyEmailBanner({ email }: { email: string }) {
     }
   };
   return (
-    <div className="vp-alert vp-alert-warning" style={{ marginBottom: 16 }} role="status">
-      Confirmez votre adresse <strong>{email}</strong> avec le lien reçu par e-mail. D’ici là, la connexion d’un prestataire, l’équipe, les intégrations et le dossier KYB restent bloqués.{' '}
+    <Alert kind="warning">
+      {t('banner.verify', { email })}{' '}
       {state === 'sent' ? (
-        <span>Nouveau lien envoyé.</span>
+        <span>{t('banner.sent')}</span>
       ) : state === 'error' ? (
-        <span>Envoi impossible pour l’instant, réessayez plus tard.</span>
+        <span>{t('banner.sendFailed')}</span>
       ) : (
-        <button type="button" onClick={resend} style={{ background: 'none', border: 0, padding: 0, color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}>
-          Renvoyer le lien
+        <button type="button" className="vp-link-btn" onClick={resend}>
+          {t('banner.resend')}
         </button>
       )}
-    </div>
+    </Alert>
   );
 }
 
@@ -45,55 +61,68 @@ function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { me, org, orgId, setOrgId } = useOrg();
+  const { t, tr } = useT();
   const logout = async () => {
     await api('/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     router.replace('/login');
   };
+  const canCreate = org.role !== 'viewer' && org.status === 'active';
   return (
-    <div className="vp-shell">
-      <nav className="vp-sidebar" aria-label="Navigation principale">
-        <Logo href="/app" />
-        {NAV.map((n) => (
-          <a key={n.href} className="vp-nav-link" href={n.href} aria-current={pathname === n.href ? 'page' : undefined}>
-            {n.label}
-          </a>
-        ))}
-        <div style={{ flex: 1 }} />
-        {me.organizations.length > 1 && (
-          <select aria-label="Organisation" className="vp-input" value={orgId} onChange={(e) => setOrgId(e.target.value)} style={{ background: 'transparent', color: '#fff' }}>
-            {me.organizations.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.displayName}
-              </option>
-            ))}
-          </select>
-        )}
-        <div className="vp-small" style={{ padding: '8px 12px', color: '#9fb2d3' }}>
-          {org.displayName}
-          <br />
-          {me.user.fullName} · {org.role}
-        </div>
-        <button className="vp-nav-link" style={{ background: 'none', border: 0, textAlign: 'start', cursor: 'pointer', font: 'inherit' }} onClick={logout}>
-          Se déconnecter
-        </button>
-      </nav>
-      <main className="vp-main">
-        {!me.user.emailVerified && <VerifyEmailBanner email={me.user.email} />}
-        {org.status !== 'active' && (
-          <div className="vp-alert vp-alert-danger" style={{ marginBottom: 16 }}>
-            Votre organisation est suspendue. Les nouvelles opérations sont bloquées. Contactez le support VITPAY.
+    <AppShell
+      pathname={pathname}
+      nav={nav(org.role, t)}
+      home="/app"
+      cta={
+        canCreate ? (
+          <LinkButton href="/app/requests/new" icon="plus">
+            {t('nav.new')}
+          </LinkButton>
+        ) : undefined
+      }
+      footer={
+        <>
+          <div className="vp-who">
+            <strong>{org.displayName}</strong>
+            {me.user.fullName} · {tr('role', org.role, ROLE_LABELS_FR[org.role] ?? org.role)}
+            {me.organizations.length > 1 && (
+              <select aria-label={t('nav.switchOrg')} className="vp-input" value={orgId} onChange={(e) => setOrgId(e.target.value)}>
+                {me.organizations.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.displayName}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div style={{ marginTop: 10 }}>
+              <LangSwitch dark />
+            </div>
+          </div>
+          <button type="button" className="vp-nav-link" onClick={logout}>
+            <Icon name="logout" />
+            {t('nav.logout')}
+          </button>
+        </>
+      }
+    >
+      <div className="vp-stack-lg">
+        {(!me.user.emailVerified || org.status !== 'active') && (
+          <div className="vp-stack">
+            {!me.user.emailVerified && <VerifyEmailBanner email={me.user.email} />}
+            {org.status !== 'active' && <Alert kind="danger">{t('banner.suspended')}</Alert>}
           </div>
         )}
         {children}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <OrgProvider>
-      <Shell>{children}</Shell>
-    </OrgProvider>
+    <ToastProvider>
+      <OrgProvider>
+        <Shell>{children}</Shell>
+      </OrgProvider>
+    </ToastProvider>
   );
 }

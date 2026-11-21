@@ -14,7 +14,7 @@ COPY apps/${APP}/package.json apps/${APP}/
 RUN pnpm install --frozen-lockfile --filter @vitpay/${APP}...
 COPY packages/ui packages/ui
 COPY apps/${APP} apps/${APP}
-RUN pnpm --filter @vitpay/${APP} build
+RUN pnpm --filter @vitpay/${APP} build && mkdir -p apps/${APP}/public
 
 FROM node:22-bookworm-slim
 ARG APP
@@ -22,6 +22,8 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/${APP}/.next/standalone ./
 COPY --from=build --chown=node:node /repo/apps/${APP}/.next/static ./apps/${APP}/.next/static
+# Fichiers publics (icônes de l'application installable) : non inclus dans la sortie standalone.
+COPY --from=build --chown=node:node /repo/apps/${APP}/public ./apps/${APP}/public
 USER node
 ENV APP_DIR=/app/apps/${APP}
 CMD ["sh", "-c", "node $APP_DIR/server.js"]

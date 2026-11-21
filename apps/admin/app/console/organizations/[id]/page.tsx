@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, use, useState } from 'react';
-import { Alert, api, ApiError, Button, Card, Field, StatusBadge } from '@vitpay/ui';
+import { Alert, api, Button, Card, Field, StatusBadge, errorText } from '@vitpay/ui';
 import { useLoad } from '../../admin-context';
 
 interface OrgDetail {
@@ -32,7 +32,7 @@ export default function OrgDetailPage({ params }: { params: Promise<{ id: string
       setMsg({ kind: 'success', text: ok });
       reload();
     } catch (err) {
-      setMsg({ kind: 'danger', text: err instanceof ApiError ? `${err.message}${err.status === 403 ? ' (permission requise)' : ''}` : 'Erreur' });
+      setMsg({ kind: 'danger', text: errorText(err) });
     }
   };
 
@@ -126,7 +126,7 @@ export default function OrgDetailPage({ params }: { params: Promise<{ id: string
               });
               setMsg({ kind: 'success', text: 'Modification soumise à validation (quatre yeux).' });
             } catch (err) {
-              setMsg({ kind: 'danger', text: err instanceof ApiError ? err.message : 'Erreur' });
+              setMsg({ kind: 'danger', text: errorText(err) });
             }
           }}
         >
@@ -182,7 +182,7 @@ function KybDocs({ orgId, onMessage }: { orgId: string; onMessage: (m: { kind: '
       onMessage({ kind: 'success', text: 'Revue enregistrée.' });
       reload();
     } catch (e) {
-      onMessage({ kind: 'danger', text: e instanceof ApiError ? e.message : 'Erreur' });
+      onMessage({ kind: 'danger', text: errorText(e) });
     }
   };
   return (

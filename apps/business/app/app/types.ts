@@ -1,4 +1,4 @@
-import type { MoneyView } from '@vitpay/ui';
+import { STATUS_LABELS_FR, type MoneyView } from '@vitpay/ui';
 
 export interface PaymentRequest {
   id: string;
@@ -8,6 +8,7 @@ export interface PaymentRequest {
   description: string | null;
   customerName: string | null;
   customerContact: string | null;
+  customerEmail?: string | null;
   mode: 'sandbox' | 'live';
   status: 'open' | 'paid' | 'expired' | 'cancelled';
   expiresAt: string;
@@ -86,6 +87,7 @@ export const ACTOR_LABELS: Record<string, string> = {
 };
 
 export const STATUS_LABELS: Record<string, string> = {
+  ...STATUS_LABELS_FR,
   open: 'En attente',
   paid: 'Payée',
   expired: 'Expirée',

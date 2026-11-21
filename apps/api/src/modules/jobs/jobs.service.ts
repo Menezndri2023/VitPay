@@ -8,6 +8,7 @@ import { AccountCleanupService } from '../identity/account-cleanup.service';
 import { EmailService } from '../email/email.service';
 import { OutboxService } from '../platform/outbox.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
+import { RefundsService } from '../payments/refunds.service';
 
 /**
  * Tâches de fond (ADR-007 : file de tâches PostgreSQL, SKIP LOCKED — pas de Redis au MVP).
@@ -29,6 +30,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly cleanup: AccountCleanupService,
     private readonly db: Db,
     private readonly terminals: TerminalsService,
+    private readonly refunds: RefundsService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -40,6 +42,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     this.every('send-emails', 5_000, () => this.email.processQueue());
     this.every('deliver-webhooks', 3_000, () => this.developers.deliverDue());
     this.every('recover-terminal-attempts', 30_000, () => this.terminals.recoverPending());
+    this.every('refresh-pending-refunds', 120_000, () => this.refunds.refreshPending());
     this.every('purge-rate-limits', 60_000, () => this.purgeRateLimits());
     this.every('release-unverified-accounts', 3_600_000, () => this.cleanup.releaseUnverified());
     this.logger.log('background jobs started');

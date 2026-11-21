@@ -2,7 +2,8 @@ import { createHmac } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Money } from '@vitpay/money';
 import { WebhookVerificationError, type ProviderAccountContext } from './provider.interface';
-import { mapYouCanStatus, parseTransaction, YouCanPayProvider } from './youcanpay.provider';
+import { mapYouCanRefundStatus, mapYouCanStatus, parseRefund, parseTransaction, YouCanPayProvider } from './youcanpay.provider';
+import type { AppConfig } from '../../config';
 
 const PRI = 'pri_sandbox_00000000-test-0000-0000-000000000000';
 const account: ProviderAccountContext = {
@@ -79,5 +80,49 @@ describe('YouCanPayProvider — transactions', () => {
     expect(() => p.validateCredentials('sandbox', { publicKey: 'pub_sandbox_a', privateKey: 'pri_sandbox_b' })).not.toThrow();
     expect(() => p.validateCredentials('sandbox', { publicKey: 'pub_a', privateKey: 'pri_b' })).toThrow();
     expect(() => p.validateCredentials('live', { publicKey: 'pub_sandbox_a', privateKey: 'pri_sandbox_b' })).toThrow();
+  });
+});
+
+describe('YouCanPayProvider — remboursements (API v2, comptes réels)', () => {
+  const live: ProviderAccountContext = { ...account, mode: 'live', credentials: { publicKey: 'pub_live', privateKey: 'pri_live_key' }, webhookSecret: 'pri_live_key' };
+  const enabled = new YouCanPayProvider({ YOUCAN_REFUNDS_ENABLED: true } as AppConfig);
+  const refundJson = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({ object: 'v2.refund', id: 'rf_1', transaction_id: 'tx_1', amount: { amount: '60.00', currency: 'MAD', localized: 'MAD 60.00' }, status: 'pending', ...over });
+
+  it('fermés par défaut, et toujours fermés en sandbox (la v2 refuse les clés sandbox)', async () => {
+    expect(p.refundsAvailable('live')).toBe(false);
+    expect(enabled.refundsAvailable('sandbox')).toBe(false);
+    expect(enabled.refundsAvailable('live')).toBe(true);
+    await expect(p.refund(live, { providerRef: 'tx_1', amount: Money.of(6000n, 'MAD'), refundId: 'r1' })).rejects.toThrow(/not enabled/);
+  });
+
+  it('envoie le formulaire documenté (unités mineures, motif, note VITPAY) avec la clé privée en Basic', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(refundJson(), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const r = await enabled.refund(live, { providerRef: 'tx_1', amount: Money.of(6000n, 'MAD'), refundId: 'r1' });
+    expect(r).toMatchObject({ providerRefundRef: 'rf_1', status: 'pending' });
+    expect(r.amount.minor).toBe(6000n);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit & { body: URLSearchParams; headers: Record<string, string> }];
+    expect(url).toBe('https://youcanpay.com/api/v2/refunds');
+    expect(init.method).toBe('POST');
+    expect(Object.fromEntries(init.body)).toEqual({ transaction_id: 'tx_1', amount: '6000', reason: 'requested-by-customer', note: 'VITPAY r1' });
+    expect(init.headers.authorization).toBe(`Basic ${Buffer.from('pri_live_key:').toString('base64')}`);
+  });
+
+  it('refus du prestataire : erreur explicite ; relecture du statut par GET /api/v2/refunds/{id}', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'Exceeds available balance' }), { status: 422 })));
+    await expect(enabled.refund(live, { providerRef: 'tx_1', amount: Money.of(6000n, 'MAD'), refundId: 'r1' })).rejects.toThrow(/Exceeds available balance/);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(refundJson({ status: 'succeeded' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await enabled.getRefund(live, 'rf_1')).status).toBe('succeeded');
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('https://youcanpay.com/api/v2/refunds/rf_1');
+  });
+
+  it('statuts documentés uniquement ; transaction et montant contrôlés', () => {
+    expect(mapYouCanRefundStatus('canceled')).toBe('failed');
+    expect(mapYouCanRefundStatus('failed')).toBe('failed');
+    expect(() => mapYouCanRefundStatus('done')).toThrow();
+    expect(() => parseRefund(JSON.parse(refundJson()), 'tx_autre', 'MAD')).toThrow(/mismatch/);
+    expect(() => parseRefund(JSON.parse(refundJson({ amount: { amount: 'abc', currency: 'MAD' } })), 'tx_1', 'MAD')).toThrow();
   });
 });

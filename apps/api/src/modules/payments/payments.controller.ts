@@ -117,7 +117,7 @@ export class PaymentsController {
   async qr(@Org() org: OrgContext, @Auth() a: AuthContext, @Param('id', new ZodPipe(UUID)) id: string, @Res() res: Response) {
     await this.payments.assertModeAccess(org.orgId, a.apiKeyMode, { requestId: id });
     const r = await this.payments.getRequest(org.orgId, id);
-    const svg = await QRCode.toString(r.payUrl, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#0B1F44', light: '#FFFFFF' } });
+    const svg = await QRCode.toString(r.payUrl, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#0B3D2E', light: '#FFFFFF' } });
     res.type('image/svg+xml').setHeader('Cache-Control', 'private, max-age=300').send(svg);
   }
 

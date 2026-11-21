@@ -34,6 +34,7 @@ import { TerminalsService } from './modules/payments/terminals.service';
 import { NotificationsConsumer } from './modules/notifications/notifications.consumer';
 import { OrganizationsController } from './modules/organizations/organizations.controller';
 import { OrganizationsService } from './modules/organizations/organizations.service';
+import { PaymentLinksController, PaymentLinksService, PublicPaymentLinksController } from './modules/payments/payment-links';
 import { PaymentsController, PublicPaymentsController } from './modules/payments/payments.controller';
 import { PaymentsService } from './modules/payments/payments.service';
 import { RefundsService } from './modules/payments/refunds.service';
@@ -67,6 +68,8 @@ export class AppModule {
       OrganizationsController,
       PaymentsController,
       PublicPaymentsController,
+      PaymentLinksController,
+      PublicPaymentLinksController,
       WebhooksController,
       AdminController,
       AdminBillingController,
@@ -110,6 +113,7 @@ export class AppModule {
         TerminalsService,
         OrganizationsService,
         PaymentsService,
+        PaymentLinksService,
         RefundsService,
         WebhooksService,
         ReconciliationService,

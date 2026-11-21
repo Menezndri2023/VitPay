@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export const viewport: Viewport = { width: 'device-width', initialScale: 1, themeColor: '#0b2a5b' };
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, themeColor: '#0b3d2e' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

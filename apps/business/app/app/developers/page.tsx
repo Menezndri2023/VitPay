@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Alert, ApiError, Button, Card, Field, formatDate, StatusBadge } from '@vitpay/ui';
+import { Alert, Button, Card, CopyButton, EmptyState, errorText, Field, formatDate, LinkButton, PageHeader, PageSkeleton, StatusBadge, TestBadge } from '@vitpay/ui';
 import { useOrg } from '../org-context';
 
 interface ApiKey {
@@ -48,18 +48,25 @@ export default function DevelopersPage() {
   const [secret, setSecret] = useState<{ label: string; value: string } | null>(null);
   const [msg, setMsg] = useState<{ kind: 'success' | 'danger'; text: string } | null>(null);
 
+  const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    setCatalog(await orgApi('/developers/catalog'));
-    setKeys(await orgApi('/developers/api-keys'));
-    setLiveKeysAvailable((await orgApi<{ liveKeysAvailable: boolean }>('/developers/settings')).liveKeysAvailable);
-    setHooks(await orgApi('/developers/webhooks'));
+    const [c, k, st, h] = await Promise.all([
+      orgApi<{ scopes: string[]; events: string[] }>('/developers/catalog'),
+      orgApi<ApiKey[]>('/developers/api-keys'),
+      orgApi<{ liveKeysAvailable: boolean }>('/developers/settings'),
+      orgApi<{ endpoints: Endpoint[]; recentDeliveries: Delivery[] }>('/developers/webhooks'),
+    ]);
+    setCatalog(c);
+    setKeys(k);
+    setLiveKeysAvailable(st.liveKeysAvailable);
+    setHooks(h);
   }, [orgApi]);
   useEffect(() => {
-    if (org.role === 'owner' || org.role === 'admin') void load();
+    if (org.role === 'owner' || org.role === 'admin') load().catch((e) => setMsg({ kind: 'danger', text: errorText(e) }));
   }, [load, org.role]);
 
-  if (org.role !== 'owner' && org.role !== 'admin') return <Alert kind="warning">Réservé aux propriétaires et administrateurs.</Alert>;
-  if (!catalog) return <p className="vp-muted">Chargement…</p>;
+  if (org.role !== 'owner' && org.role !== 'admin') return <Alert kind="warning">Réservé aux propriétaires et administrateurs de l’organisation.</Alert>;
+  if (!catalog) return msg ? <Alert kind={msg.kind}>{msg.text}</Alert> : <PageSkeleton />;
 
   const rotate = (ep: Endpoint) =>
     run(async () => {
@@ -77,13 +84,17 @@ export default function DevelopersPage() {
     }, 'Secret remplacé.');
 
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
+    if (busy) return;
     setMsg(null);
+    setBusy(true);
     try {
       await fn();
       if (ok) setMsg({ kind: 'success', text: ok });
       await load();
     } catch (e) {
-      setMsg({ kind: 'danger', text: e instanceof ApiError ? `${e.message}${e.details ? ` — ${JSON.stringify(e.details)}` : ''}` : 'Erreur' });
+      setMsg({ kind: 'danger', text: errorText(e) });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -107,25 +118,45 @@ export default function DevelopersPage() {
   };
 
   return (
-    <div className="vp-stack" style={{ maxWidth: 900 }}>
-      <h1>Développeurs</h1>
-      <p className="vp-muted" style={{ margin: 0 }}>
-        Intégrez VITPAY à votre site ou à votre logiciel : créez des demandes de paiement par API et recevez les confirmations par webhook. Identifiant d’organisation : <code>{orgId}</code>
-      </p>
+    <div className="vp-stack-lg" style={{ maxWidth: 920 }}>
+      <PageHeader
+        title="Développeurs"
+        subtitle="Intégrez VITPAY à votre site ou à votre logiciel : créez des demandes de paiement par API et recevez les confirmations par webhook."
+        actions={
+          <LinkButton variant="ghost" icon="external" href="https://vitpay-ma.com/developpeurs.html" target="_blank" rel="noreferrer">
+            Documentation
+          </LinkButton>
+        }
+      />
+      <div className="vp-card vp-row vp-between">
+        <span>
+          <span className="vp-muted vp-small" style={{ display: 'block' }}>
+            Identifiant d’organisation (dans l’URL des appels API)
+          </span>
+          <code style={{ fontSize: 14 }}>{orgId}</code>
+        </span>
+        <CopyButton text={orgId} size="sm" />
+      </div>
       {secret && (
         <Alert kind="warning">
           <strong>{secret.label}</strong> — copiez-la maintenant, elle ne sera plus jamais affichée :
-          <div style={{ marginTop: 8 }}>
+          <div className="vp-row" style={{ marginTop: 8, flexWrap: 'nowrap', gap: 8 }}>
             <input className="vp-input vp-mono" readOnly value={secret.value} onFocus={(e) => e.currentTarget.select()} aria-label="Secret" />
+            <CopyButton text={secret.value} variant="primary" />
           </div>
-          <Button variant="ghost" style={{ marginTop: 8 }} onClick={() => setSecret(null)}>
-            J’ai copié le secret
+          <Button variant="ghost" size="sm" style={{ marginTop: 8 }} onClick={() => setSecret(null)}>
+            J’ai mis le secret en lieu sûr
           </Button>
         </Alert>
       )}
       {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
 
-      <Card title="Clés API">
+      <Card title="Clés API" description="Une clé de test crée des demandes payables avec le prestataire simulé ou vos clés sandbox : aucun argent réel. Gardez les clés côté serveur, jamais dans une application mobile ou une page web.">
+        {keys.length === 0 ? (
+          <EmptyState icon="key" title="Aucune clé API">
+            Créez une clé de test ci-dessous pour faire vos premiers appels.
+          </EmptyState>
+        ) : (
         <div className="vp-table-wrap">
           <table className="vp-table">
             <thead>
@@ -139,35 +170,30 @@ export default function DevelopersPage() {
               </tr>
             </thead>
             <tbody>
-              {keys.map((k) => (
-                <tr key={k.id}>
+              {[...keys].sort((a, b) => Number(!!a.revokedAt) - Number(!!b.revokedAt)).map((k) => (
+                <tr key={k.id} style={k.revokedAt ? { opacity: 0.55 } : undefined}>
                   <td>{k.name}</td>
-                  <td>{k.mode === 'live' ? <span className="vp-badge vp-badge-success">Réel</span> : <span className="vp-badge">Test</span>}</td>
+                  <td>{k.mode === 'live' ? <span className="vp-badge vp-badge-success vp-badge-plain">Réel</span> : <TestBadge />}</td>
                   <td className="vp-mono">{k.prefix}…</td>
                   <td className="vp-small">{k.scopes.map((s) => SCOPE_LABEL[s] ?? s).join(', ')}</td>
                   <td className="vp-small">{formatDate(k.lastUsedAt)}</td>
                   <td>
                     {k.revokedAt ? (
-                      <StatusBadge status="cancelled" label="révoquée" />
+                      <StatusBadge status="revoked" />
                     ) : (
-                      <Button variant="ghost" onClick={() => confirm(`Révoquer la clé « ${k.name} » ? Les intégrations qui l’utilisent cesseront de fonctionner.`) && run(() => orgApi(`/developers/api-keys/${k.id}`, { method: 'DELETE' }), 'Clé révoquée.')}>
+                      <Button variant="ghost" size="sm" onClick={() => confirm(`Révoquer la clé « ${k.name} » ? Les intégrations qui l’utilisent cesseront de fonctionner.`) && run(() => orgApi(`/developers/api-keys/${k.id}`, { method: 'DELETE' }), 'Clé révoquée.')}>
                         Révoquer
                       </Button>
                     )}
                   </td>
                 </tr>
               ))}
-              {!keys.length && (
-                <tr>
-                  <td colSpan={6} className="vp-muted">
-                    Aucune clé.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
-        <form className="vp-stack" style={{ marginTop: 12 }} onSubmit={createKey}>
+        )}
+        <form className="vp-stack" style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--vp-border)' }} onSubmit={createKey}>
+          <h3 style={{ margin: 0 }}>Nouvelle clé</h3>
           <Field label="Nom de la clé" name="name" placeholder="Site e-commerce" required minLength={2} />
           <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="vp-label">Mode</legend>
@@ -191,11 +217,15 @@ export default function DevelopersPage() {
               ))}
             </div>
           </fieldset>
-          <Button type="submit">Créer une clé</Button>
+          <div>
+            <Button type="submit" icon="key" busy={busy}>
+              Créer une clé
+            </Button>
+          </div>
         </form>
       </Card>
 
-      <Card title="Webhooks">
+      <Card title="Webhooks" description="VITPAY envoie un événement signé à votre serveur à chaque changement : paiement confirmé, échoué, remboursé… Vérifiez toujours la signature VitPay-Signature.">
         {hooks.endpoints.map((ep) => (
           <div key={ep.id} className="vp-row vp-between" style={{ borderBottom: '1px solid var(--vp-border)', padding: '8px 0' }}>
             <span>
@@ -209,13 +239,13 @@ export default function DevelopersPage() {
               <StatusBadge status={ep.status} />
               {ep.status === 'active' && (
                 <>
-                  <Button variant="ghost" onClick={() => run(() => orgApi(`/developers/webhooks/${ep.id}/test`, { method: 'POST' }), 'Événement de test programmé.')}>
+                  <Button variant="ghost" size="sm" onClick={() => run(() => orgApi(`/developers/webhooks/${ep.id}/test`, { method: 'POST' }), 'Événement de test programmé : il apparaîtra dans les livraisons récentes.')}>
                     Tester
                   </Button>
-                  <Button variant="ghost" onClick={() => rotate(ep)}>
+                  <Button variant="ghost" size="sm" onClick={() => rotate(ep)}>
                     Changer le secret
                   </Button>
-                  <Button variant="ghost" onClick={() => run(() => orgApi(`/developers/webhooks/${ep.id}`, { method: 'DELETE' }), 'Endpoint désactivé.')}>
+                  <Button variant="ghost" size="sm" onClick={() => confirm(`Désactiver l’envoi des événements vers ${ep.url} ?`) && run(() => orgApi(`/developers/webhooks/${ep.id}`, { method: 'DELETE' }), 'Endpoint désactivé.')}>
                     Désactiver
                   </Button>
                 </>
@@ -223,19 +253,29 @@ export default function DevelopersPage() {
             </span>
           </div>
         ))}
-        <form className="vp-stack" style={{ marginTop: 12 }} onSubmit={createHook}>
+        {!hooks.endpoints.length && (
+          <p className="vp-muted" style={{ marginTop: 0 }}>
+            Aucun endpoint. Sans webhook, interrogez l’API pour connaître le statut d’un paiement.
+          </p>
+        )}
+        <form className="vp-stack" style={{ marginTop: 16, paddingTop: 16, borderTop: hooks.endpoints.length ? '1px solid var(--vp-border)' : 0 }} onSubmit={createHook}>
+          <h3 style={{ margin: 0 }}>Nouvel endpoint</h3>
           <Field label="URL HTTPS de réception" name="url" type="url" placeholder="https://monsite.ma/webhooks/vitpay" required />
           <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="vp-label">Événements</legend>
             <div className="vp-row">
               {catalog.events.map((ev) => (
                 <label key={ev} className="vp-row vp-small" style={{ gap: 6 }}>
-                  <input type="checkbox" name="events" value={ev} defaultChecked={ev === 'payment.succeeded'} /> {ev}
+                  <input type="checkbox" name="events" value={ev} defaultChecked={ev === 'payment.succeeded'} /> <code>{ev}</code>
                 </label>
               ))}
             </div>
           </fieldset>
-          <Button type="submit">Ajouter l’endpoint</Button>
+          <div>
+            <Button type="submit" busy={busy}>
+              Ajouter l’endpoint
+            </Button>
+          </div>
         </form>
         {hooks.recentDeliveries.length > 0 && (
           <>
@@ -248,7 +288,7 @@ export default function DevelopersPage() {
                       <td className="vp-small">{formatDate(d.createdAt)}</td>
                       <td className="vp-mono vp-small">{d.eventType}</td>
                       <td>
-                        <StatusBadge status={d.status === 'succeeded' ? 'succeeded' : d.status === 'failed' ? 'failed' : 'pending'} label={d.status} />
+                        <StatusBadge status={d.status === 'succeeded' || d.status === 'delivered' ? 'succeeded' : d.status === 'failed' || d.status === 'dead' ? 'failed' : 'pending'} label={d.status === 'succeeded' || d.status === 'delivered' ? 'Livré' : d.status === 'failed' || d.status === 'dead' ? 'Échec' : 'En attente'} />
                       </td>
                       <td className="vp-small vp-muted">
                         {d.attempts} essai(s) {d.lastStatusCode ? `· HTTP ${d.lastStatusCode}` : ''} {d.lastError ?? ''}
@@ -261,8 +301,8 @@ export default function DevelopersPage() {
           </>
         )}
       </Card>
-      <p className="vp-muted vp-small">
-        Documentation : <code>docs/DEVELOPERS.md</code> — authentification, mode test et réel, idempotence, vérification des signatures.
+      <p className="vp-muted vp-small" style={{ margin: 0 }}>
+        Documentation complète (authentification, modes test et réel, idempotence, signatures, kit Node.js) : <a href="https://vitpay-ma.com/developpeurs.html" target="_blank" rel="noreferrer">vitpay-ma.com/developpeurs</a>.
       </p>
     </div>
   );

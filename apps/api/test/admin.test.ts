@@ -61,6 +61,23 @@ describe('VITPAY ADMIN', () => {
     expect(kyb.status).toBe(200);
   });
 
+  it('liste des organisations : filtre d’activité (réelle / test) et pagination', async () => {
+    const root = await adminSession(ctx, 'root@admin.test');
+    const all = await root.get('/v1/admin/organizations');
+    expect(all.status).toBe(200);
+    expect(all.body.length).toBeGreaterThan(0);
+    // Aucun compte réel dans cet environnement de test : tout est « test uniquement ».
+    expect(all.body.every((o: { liveActivity: boolean }) => o.liveActivity === false)).toBe(true);
+    expect((await root.get('/v1/admin/organizations?activity=live')).body).toEqual([]);
+    expect((await root.get('/v1/admin/organizations?activity=test')).body.length).toBe(all.body.length);
+    // Pagination : la page suivante commence strictement après la dernière ligne reçue.
+    const last = all.body[all.body.length - 1] as { id: string; createdAt: string };
+    const next = await root.get(`/v1/admin/organizations?before=${encodeURIComponent(last.createdAt)}`);
+    expect(next.status).toBe(200);
+    expect(next.body.some((o: { id: string }) => o.id === last.id)).toBe(false);
+    expect((await root.get('/v1/admin/organizations?activity=autre')).status).toBe(422);
+  });
+
   it('principe des quatre yeux : modification des frais', async () => {
     const { orgId } = await registerMerchant(ctx, 'fees@admin.test', 'Org Frais');
     const root = await adminSession(ctx, 'root@admin.test');

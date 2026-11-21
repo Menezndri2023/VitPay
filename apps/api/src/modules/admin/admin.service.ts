@@ -64,16 +64,27 @@ export class AdminService {
     });
   }
 
-  async listOrgs(a: AuthContext, q?: string, status?: string) {
+  /**
+   * Liste paginée (50 par page, du plus récent au plus ancien ; `before` = date de création de la
+   * dernière ligne reçue). `activity` : `live` = au moins un compte prestataire réel ou une demande
+   * réelle ; `test` = aucune activité réelle (comptes d'essai, comptes des tests automatiques).
+   */
+  async listOrgs(a: AuthContext, q?: string, status?: string, activity?: string, before?: string) {
     const rows = await this.db.system((tx) =>
       tx.query<Record<string, unknown>>(
-        `SELECT o.id, o.type, o.display_name, o.legal_name, o.ice, o.rc, o.status, o.kyb_status, o.vitpay_fee_bps, o.created_at,
-                (SELECT count(*) FROM payment_requests pr WHERE pr.org_id = o.id)::int AS request_count
-           FROM organizations o
-          WHERE ($1::text IS NULL OR o.display_name ILIKE '%' || $1 || '%' OR o.legal_name ILIKE '%' || $1 || '%' OR o.ice = $1)
-            AND ($2::text IS NULL OR o.status = $2 OR o.kyb_status = $2)
-          ORDER BY o.created_at DESC LIMIT 200`,
-        [q ?? null, status ?? null],
+        `SELECT * FROM (
+           SELECT o.id, o.type, o.display_name, o.legal_name, o.ice, o.rc, o.status, o.kyb_status, o.vitpay_fee_bps, o.created_at,
+                  (SELECT count(*) FROM payment_requests pr WHERE pr.org_id = o.id)::int AS request_count,
+                  (EXISTS (SELECT 1 FROM provider_accounts pa WHERE pa.org_id = o.id AND pa.mode = 'live')
+                   OR EXISTS (SELECT 1 FROM payment_requests pr WHERE pr.org_id = o.id AND pr.mode = 'live')) AS live_activity
+             FROM organizations o
+            WHERE ($1::text IS NULL OR o.display_name ILIKE '%' || $1 || '%' OR o.legal_name ILIKE '%' || $1 || '%' OR o.ice = $1)
+              AND ($2::text IS NULL OR o.status = $2 OR o.kyb_status = $2)
+              AND ($4::timestamptz IS NULL OR o.created_at < $4)
+         ) x
+         WHERE ($3::text IS NULL OR ($3 = 'live') = x.live_activity)
+         ORDER BY x.created_at DESC, x.id DESC LIMIT 50`,
+        [q ?? null, status ?? null, activity ?? null, before ?? null],
       ),
     );
     return rows.map((r) => this.maskOrg(a, r));

@@ -195,7 +195,7 @@ test('mot de passe oublié : e-mail réel (SMTP → Mailpit) puis réinitialisat
 
 test('KYB : dépôt d’un justificatif depuis les paramètres', async ({ page }) => {
   await useMerchantSession(page);
-  await page.goto(`${BIZ}/app/settings`);
+  await page.goto(`${BIZ}/app/settings?tab=company`);
   await page.getByLabel('Type de document').selectOption('ice_certificate');
   await page.getByLabel('Fichier').setInputFiles({ name: 'attestation-ice.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF\n') });
   await page.getByRole('button', { name: 'Envoyer' }).click();
@@ -274,7 +274,7 @@ test('TPE simulé : encaissement carte présente depuis la caisse', async ({ pag
   await useMerchantSession(page);
 
   // Ajout d'un TPE simulé
-  await page.goto(`${BIZ}/app/settings`);
+  await page.goto(`${BIZ}/app/settings?tab=pos`);
   await page.getByLabel('Nom du TPE simulé').fill(label);
   await page.getByRole('button', { name: 'Ajouter un TPE simulé' }).click();
   await expect(page.getByText('TPE simulé ajouté.')).toBeVisible();
@@ -302,4 +302,47 @@ test('TPE simulé : encaissement carte présente depuis la caisse', async ({ pag
 
   // Confirmation en caisse (preuve serveur)
   await expect(page.getByText('Paiement confirmé')).toBeVisible({ timeout: 20_000 });
+});
+
+test('lien de paiement réutilisable : montant libre saisi par le client, puis paiement', async ({ page, context }) => {
+  const title = `Don E2E ${Date.now() % 100000}`;
+  await useMerchantSession(page);
+  await page.goto(`${BIZ}/app/links`);
+  await page.getByLabel('Intitulé (visible par le client)').fill(title);
+  await page.getByLabel('Montant libre (le client saisit le montant)').check();
+  await page.getByRole('button', { name: 'Créer le lien' }).click();
+  const linkUrl = await page.getByLabel(`Lien ${title}`).inputValue();
+  expect(linkUrl).toMatch(/\/l\/[A-Za-z0-9_-]{16,}$/);
+  await shot(page, '20-links');
+
+  const payer = await context.browser()!.newContext({ locale: 'fr-FR' });
+  const p = await payer.newPage();
+  await p.goto(linkUrl.replace(/^https?:\/\/[^/]+/, PAY));
+  await expect(p.getByRole('heading', { name: title })).toBeVisible();
+  await p.getByLabel(/Montant à payer/).fill('35,50');
+  await p.getByRole('button', { name: 'Continuer vers le paiement' }).click();
+  await expect(p).toHaveURL(/\/r\/[A-Za-z0-9_-]+$/);
+  await expect(p.locator('.vp-amount')).toContainText('35,50');
+  await p.getByRole('button', { name: 'Payer par carte bancaire' }).click();
+  await p.getByRole('button', { name: 'Payer — scénario succès' }).click();
+  await expect(p.getByText('Paiement confirmé')).toBeVisible({ timeout: 20_000 });
+  await payer.close();
+
+  await page.reload();
+  await expect(page.locator('.vp-card', { hasText: title }).getByText('1 paiement')).toBeVisible();
+});
+
+test('espace commerçant en arabe : bascule de langue, sens RTL, choix mémorisé', async ({ page }) => {
+  await useMerchantSession(page);
+  await page.goto(`${BIZ}/app`);
+  await page.getByRole('button', { name: 'العربية' }).click();
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.getByRole('heading', { name: /مرحبًا/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'طلبات الدفع' })).toBeVisible();
+  await page.goto(`${BIZ}/app/pos`);
+  await expect(page.getByRole('button', { name: 'إنشاء رمز QR للتحصيل' })).toBeVisible();
+  await shot(page, '21-pos-ar');
+  await page.getByRole('button', { name: 'Français' }).click();
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+  await expect(page.getByRole('button', { name: 'Générer le QR d’encaissement' })).toBeVisible();
 });

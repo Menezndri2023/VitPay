@@ -35,6 +35,8 @@ export interface CreateRequestInput {
   successUrl?: string;
   cancelUrl?: string;
   metadata?: Record<string, string>;
+  /** Demande ouverte par un client depuis un lien de paiement réutilisable. */
+  paymentLinkId?: string;
 }
 
 /**
@@ -220,8 +222,8 @@ export class PaymentsService {
       }
       const row = await tx.one<PaymentRequestRow>(
         `INSERT INTO payment_requests (org_id, pos_id, created_by, reference, public_token, amount_minor, currency, description,
-            customer_name, customer_contact, mode, status, expires_at, merchant_reference, success_url, cancel_url, customer_email, metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open', now() + make_interval(hours => $12), $13, $14, $15, $16, $17) RETURNING *`,
+            customer_name, customer_contact, mode, status, expires_at, merchant_reference, success_url, cancel_url, customer_email, metadata, payment_link_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open', now() + make_interval(hours => $12), $13, $14, $15, $16, $17, $18) RETURNING *`,
         [
           orgId,
           input.posId ?? null,
@@ -240,6 +242,7 @@ export class PaymentsService {
           input.cancelUrl,
           input.customerEmail?.toLowerCase() ?? null,
           JSON.stringify(input.metadata ?? {}),
+          input.paymentLinkId ?? null,
         ],
       );
       await this.audit.record(tx, {
@@ -248,7 +251,7 @@ export class PaymentsService {
         action: 'payment_request.created',
         targetType: 'payment_request',
         targetId: row.id,
-        after: { reference: row.reference, merchantReference: row.merchant_reference ?? null, amount: amount.toJSON(), mode },
+        after: { reference: row.reference, merchantReference: row.merchant_reference ?? null, amount: amount.toJSON(), mode, paymentLinkId: input.paymentLinkId ?? null },
       });
       await this.outbox.publish(tx, {
         eventType: 'payment_request.created',
@@ -259,6 +262,11 @@ export class PaymentsService {
       });
       return this.requestView(row);
     });
+  }
+
+  /** Mode qu'aurait une nouvelle demande de cette organisation (utilisé pour fixer celui d'un lien). */
+  currentMode(orgId: string, currency: Currency, forced?: ProviderMode): Promise<ProviderMode> {
+    return this.db.forOrg(orgId, (tx) => this.resolveMode(tx, currency, forced));
   }
 
   /** sandbox, sauf si le mode live est autorisé ET qu'un compte live actif existe. */

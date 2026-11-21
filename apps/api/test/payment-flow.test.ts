@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { EmailService } from '../src/modules/email/email.service';
 import { connectMock, createRequest, idemKey, ownerQuery, payerActs, registerMerchant, resetDb, Session, startApp, TestCtx, tokenOf } from './helpers';
 
 describe('parcours de paiement de bout en bout (sandbox, prestataire simulé)', () => {
@@ -110,6 +111,33 @@ describe('parcours de paiement de bout en bout (sandbox, prestataire simulé)', 
     await ctx.outbox.processBatch();
     const notifs = await s.get(`/v1/orgs/${orgId}/notifications`);
     expect(notifs.body.some((n: { type: string }) => n.type === 'payment.succeeded')).toBe(true);
+  });
+
+  it('paiement confirmé : reçu envoyé au client (si e-mail fourni) et copie à l’équipe, une seule fois', async () => {
+    const email = ctx.app.get(EmailService);
+    const r = await createRequest(s, orgId, '42.00', { customerEmail: 'client.recu@example.ma', description: 'Facture <b>2026-7</b>' });
+    await payerActs(ctx, tokenOf(r.payUrl), 'succeed');
+    await ctx.outbox.processBatch();
+    await ctx.outbox.processBatch(); // relecture de l'outbox : aucun doublon
+    await email.processQueue(50);
+    const toClient = email.sentLog.filter((m) => m.to === 'client.recu@example.ma');
+    expect(toClient).toHaveLength(1);
+    expect(toClient[0]!.template).toBe('payment.receipt');
+    expect(toClient[0]!.subject).toContain('TEST'); // demande en mode test
+    expect(toClient[0]!.text).toContain(`/api/v1/public/requests/${tokenOf(r.payUrl)}/receipt.pdf`);
+    expect(toClient[0]!.text).toMatch(/reçu VPR-\d{4}-\d{7}/);
+    // Le motif saisi par le commerçant est échappé dans la version HTML.
+    expect(toClient[0]!.html).toContain('Facture &lt;b&gt;2026-7&lt;/b&gt;');
+    const team = email.sentLog.filter((m) => m.template === 'payment.succeeded' && m.text.includes(r.reference));
+    expect(team.length).toBeGreaterThan(0);
+    expect(team[0]!.text).toContain(`/app/requests/${r.id}`);
+    // Sans e-mail client : aucun reçu envoyé.
+    const before = email.sentLog.filter((m) => m.template === 'payment.receipt').length;
+    const r2 = await createRequest(s, orgId, '43.00');
+    await payerActs(ctx, tokenOf(r2.payUrl), 'succeed');
+    await ctx.outbox.processBatch();
+    await email.processQueue(50);
+    expect(email.sentLog.filter((m) => m.template === 'payment.receipt').length).toBe(before);
   });
 
   it('un webhook rejoué ne crée jamais de seconde écriture', async () => {
