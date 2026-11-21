@@ -331,3 +331,18 @@ test('lien de paiement réutilisable : montant libre saisi par le client, puis p
   await page.reload();
   await expect(page.locator('.vp-card', { hasText: title }).getByText('1 paiement')).toBeVisible();
 });
+
+test('espace commerçant en arabe : bascule de langue, sens RTL, choix mémorisé', async ({ page }) => {
+  await useMerchantSession(page);
+  await page.goto(`${BIZ}/app`);
+  await page.getByRole('button', { name: 'العربية' }).click();
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.getByRole('heading', { name: /مرحبًا/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'طلبات الدفع' })).toBeVisible();
+  await page.goto(`${BIZ}/app/pos`);
+  await expect(page.getByRole('button', { name: 'إنشاء رمز QR للتحصيل' })).toBeVisible();
+  await shot(page, '21-pos-ar');
+  await page.getByRole('button', { name: 'Français' }).click();
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+  await expect(page.getByRole('button', { name: 'Générer le QR d’encaissement' })).toBeVisible();
+});

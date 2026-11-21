@@ -3,6 +3,14 @@
  * Identité alignée sur le site vitpay-ma.com : vert cèdre (structure, actions) et safran (attention).
  * Le safran est rare par principe : mode test, étapes à faire, éléments qui demandent une action.
  */
+/* Polices embarquées (packages/ui/fonts, licence OFL) : aucune requête vers un service tiers. */
+@font-face { font-family: "VitPay Inter"; font-style: normal; font-weight: 400 800; font-display: swap; src: url("../fonts/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "VitPay Inter"; font-style: normal; font-weight: 400 800; font-display: swap; src: url("../fonts/inter-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "VitPay Arabic"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("../fonts/noto-sans-arabic.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC; }
+
 :root {
   --vp-cedar-950: #07261c;
   --vp-cedar-900: #0b3d2e;
@@ -43,7 +51,7 @@
   --vp-radius-sm: 8px;
   --vp-shadow: 0 1px 2px rgba(11, 61, 46, 0.05);
   --vp-shadow-lift: 0 12px 32px -12px rgba(11, 61, 46, 0.22);
-  --vp-font: var(--vp-font-latin, "Inter"), system-ui, -apple-system, "Segoe UI", Roboto, var(--vp-font-arabic, "Noto Sans Arabic"), sans-serif;
+  --vp-font: "VitPay Inter", "VitPay Arabic", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif;
   --vp-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   color-scheme: light;
 }
@@ -268,7 +276,7 @@ code, .vp-mono { font-family: var(--vp-mono); font-size: 13px; }
 .vp-scrim { display: none; }
 
 @media (max-width: 900px) {
-  .vp-shell { grid-template-columns: 1fr; }
+  .vp-shell { grid-template-columns: 1fr; align-content: start; }
   .vp-topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; z-index: 30; background: var(--vp-cedar-900); color: #fff; padding: 10px 16px; }
   .vp-topbar .vp-logo { color: #fff; }
   .vp-topbar .vp-logo b { color: var(--vp-saffron-500); }
@@ -286,7 +294,8 @@ code, .vp-mono { font-family: var(--vp-mono); font-size: 13px; }
 
 /* Bandeau de test (page de paiement) */
 .vp-sandbox-banner { background: var(--vp-saffron-500); color: var(--vp-cedar-950); text-align: center; font-weight: 700; font-size: 12.5px; padding: 7px 12px; letter-spacing: .02em; }
-[dir="rtl"] .vp-amount { direction: ltr; unicode-bidi: isolate; }
+[dir="rtl"] .vp-amount, [dir="rtl"] .vp-num, [dir="rtl"] .vp-mono { direction: ltr; unicode-bidi: isolate; }
+[dir="rtl"] .vp-flip { transform: scaleX(-1); }
 
 /* Page de paiement : ticket */
 .vp-pay { min-height: 100vh; background:

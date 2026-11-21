@@ -3,18 +3,20 @@
 import { FormEvent, useState } from 'react';
 import { Alert, ApiError, Button, Card, errorText, Field, formatMoney, LinkButton, newIdempotencyKey, PageHeader, Select, TestBadge } from '@vitpay/ui';
 import { useOrg } from '../../org-context';
+import { useT, type MsgKey } from '../../../i18n';
 import { SharePanel } from '../../share-panel';
 import { PaymentRequest } from '../../types';
 
-const VALIDITY = [
-  { h: 24, label: '24 heures' },
-  { h: 72, label: '3 jours' },
-  { h: 168, label: '7 jours' },
-  { h: 720, label: '30 jours' },
+const VALIDITY: { h: number; label: MsgKey }[] = [
+  { h: 24, label: 'new.v24' },
+  { h: 72, label: 'new.v72' },
+  { h: 168, label: 'new.v168' },
+  { h: 720, label: 'new.v720' },
 ];
 
 export default function NewRequestPage() {
   const { orgApi, orgId } = useOrg();
+  const { t, tag } = useT();
   const [created, setCreated] = useState<PaymentRequest | null>(null);
   const [error, setError] = useState<{ text: string; settings?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,7 +46,7 @@ export default function NewRequestPage() {
       setCreated(r);
       window.scrollTo({ top: 0 });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 422) setError({ text: 'Montant invalide : saisissez par exemple 500 ou 500,50 (minimum 1 MAD).' });
+      if (err instanceof ApiError && err.status === 422) setError({ text: t('new.badAmount') });
       else if (err instanceof ApiError && err.code === 'invalid_state' && /prestataire/i.test(err.message)) setError({ text: err.message, settings: true });
       else setError({ text: errorText(err, 'Création impossible. Réessayez.') });
       // Après un refus définitif, une nouvelle tentative doit porter une nouvelle clé.
@@ -58,25 +60,20 @@ export default function NewRequestPage() {
     return (
       <div className="vp-stack-lg" style={{ maxWidth: 820 }}>
         <PageHeader
-          back={{ href: '/app/requests', label: 'Demandes' }}
-          title={<>Demande créée — {formatMoney(created.amount)}</>}
-          subtitle={
-            <>
-              Référence <span className="vp-mono">{created.reference}</span>
-              {created.description ? ` · ${created.description}` : ''}. Envoyez le lien ou faites scanner le QR code.
-            </>
-          }
+          back={{ href: '/app/requests', label: t('nav.requests') }}
+          title={t('new.created', { amount: formatMoney(created.amount, tag) })}
+          subtitle={t('new.createdSub', { ref: created.reference, reason: created.description ? ` · ${created.description}` : '' })}
         />
         {created.mode === 'sandbox' && (
           <Alert kind="warning">
-            <TestBadge /> Mode test : le paiement passera par le prestataire simulé. Aucun argent réel ne circule.
+            <TestBadge label={t('common.test')} /> {t('new.testNote')}
           </Alert>
         )}
-        <Card title="Partager avec votre client">
+        <Card title={t('new.share')}>
           <SharePanel req={created} orgId={orgId} />
         </Card>
         <div className="vp-row">
-          <LinkButton href={`/app/requests/${created.id}`}>Suivre le paiement</LinkButton>
+          <LinkButton href={`/app/requests/${created.id}`}>{t('new.follow')}</LinkButton>
           <Button
             variant="ghost"
             icon="plus"
@@ -85,7 +82,7 @@ export default function NewRequestPage() {
               setIdemKey(newIdempotencyKey());
             }}
           >
-            Nouvelle demande
+            {t('new.again')}
           </Button>
         </div>
       </div>
@@ -93,12 +90,12 @@ export default function NewRequestPage() {
 
   return (
     <div className="vp-stack-lg" style={{ maxWidth: 620 }}>
-      <PageHeader back={{ href: '/app/requests', label: 'Demandes' }} title="Nouvelle demande de paiement" subtitle="Vous obtenez un lien et un QR code. Votre client paie par carte, depuis son téléphone." />
+      <PageHeader back={{ href: '/app/requests', label: t('nav.requests') }} title={t('new.title')} subtitle={t('new.subtitle')} />
       <Card>
         <form className="vp-stack" onSubmit={submit} style={{ gap: 16 }}>
           <div className="vp-field">
             <label className="vp-label" htmlFor="amount">
-              Montant (MAD)
+              {t('new.amount')}
             </label>
             <div style={{ position: 'relative' }}>
               <input
@@ -110,7 +107,8 @@ export default function NewRequestPage() {
                 required
                 autoFocus
                 pattern="^\s*\d[\d\s]*([.,]\d{1,2})?\s*$"
-                title="Exemple : 500 ou 500,50"
+                title="500 / 500,50"
+                dir="ltr"
                 style={{ fontSize: 28, fontWeight: 750, minHeight: 64, paddingInlineEnd: 70 }}
                 aria-describedby="amount-hint"
               />
@@ -119,27 +117,27 @@ export default function NewRequestPage() {
               </span>
             </div>
             <span className="vp-hint" id="amount-hint">
-              Virgule ou point pour les centimes.
+              {t('new.amountHint')}
             </span>
           </div>
-          <Field label="Motif (visible par le payeur)" name="description" maxLength={200} placeholder="Ex. Facture n° 2026-104, acompte commande…" />
+          <Field label={t('new.reason')} name="description" maxLength={200} placeholder={t('new.reasonPh')} />
           <Field
-            label="Référence de commande (facultatif, unique)"
+            label={t('new.ref')}
             name="merchantReference"
             maxLength={64}
             pattern="^[A-Za-z0-9._:\/#\-]{1,64}$"
             placeholder="Ex. CMD-2026-0042"
-            hint="Une commande ne donne lieu qu’à une seule demande : protège contre les doublons."
+            hint={t('new.refHint')}
           />
           <details>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>Plus d’options</summary>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>{t('new.more')}</summary>
             <div className="vp-form-grid" style={{ marginTop: 14 }}>
-              <Field label="Nom du client (privé)" name="customerName" maxLength={120} hint="Pour vos recherches ; jamais affiché au payeur." />
-              <Field label="E-mail du client (facultatif)" name="customerEmail" type="email" maxLength={254} autoComplete="off" hint="Le reçu lui est envoyé automatiquement après le paiement." />
-              <Select label="Validité du lien" name="expiresInHours" defaultValue="72">
+              <Field label={t('new.customer')} name="customerName" maxLength={120} hint={t('new.customerHint')} />
+              <Field label={t('new.customerEmail')} name="customerEmail" type="email" maxLength={254} autoComplete="off" dir="ltr" hint={t('new.customerEmailHint')} />
+              <Select label={t('new.validity')} name="expiresInHours" defaultValue="72">
                 {VALIDITY.map((v) => (
                   <option key={v.h} value={v.h}>
-                    {v.label}
+                    {t(v.label)}
                   </option>
                 ))}
               </Select>
@@ -147,11 +145,11 @@ export default function NewRequestPage() {
           </details>
           {error && (
             <Alert kind="danger">
-              {error.text} {error.settings && <a href="/app/settings?tab=providers">Ouvrir les paramètres</a>}
+              {error.text} {error.settings && <a href="/app/settings?tab=providers">{t('new.openSettings')}</a>}
             </Alert>
           )}
           <Button type="submit" size="lg" busy={busy}>
-            Générer le lien et le QR code
+            {t('new.submit')}
           </Button>
         </form>
       </Card>

@@ -3,32 +3,35 @@
 import { useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Alert, api, AppShell, Icon, LinkButton, ROLE_LABELS_FR, ToastProvider, type NavGroup } from '@vitpay/ui';
+import { LangSwitch, useT, type MsgKey } from '../i18n';
 import { OrgProvider, useOrg } from './org-context';
 
-function nav(role: string): NavGroup[] {
+function nav(role: string, t: (k: MsgKey) => string): NavGroup[] {
   const groups: NavGroup[] = [
     {
       items: [
-        { href: '/app', label: 'Tableau de bord', icon: 'home', exact: true },
-        { href: '/app/requests', label: 'Demandes', icon: 'list' },
-        { href: '/app/pos', label: 'Caisse', icon: 'qr' },
-        { href: '/app/notifications', label: 'Notifications', icon: 'bell' },
+        { href: '/app', label: t('nav.dashboard'), icon: 'home', exact: true },
+        { href: '/app/requests', label: t('nav.requests'), icon: 'list' },
+        { href: '/app/links', label: t('nav.links'), icon: 'link' },
+        { href: '/app/pos', label: t('nav.pos'), icon: 'qr' },
+        { href: '/app/notifications', label: t('nav.notifications'), icon: 'bell' },
       ],
     },
   ];
   if (role === 'owner' || role === 'admin')
     groups.push({
-      label: 'Configuration',
+      label: t('nav.config'),
       items: [
-        { href: '/app/settings', label: 'Paramètres', icon: 'settings' },
-        { href: '/app/developers', label: 'Développeurs', icon: 'code' },
+        { href: '/app/settings', label: t('nav.settings'), icon: 'settings' },
+        { href: '/app/developers', label: t('nav.developers'), icon: 'code' },
       ],
     });
-  else groups[0]!.items.push({ href: '/app/settings', label: 'Paramètres', icon: 'settings' });
+  else groups[0]!.items.push({ href: '/app/settings', label: t('nav.settings'), icon: 'settings' });
   return groups;
 }
 
 function VerifyEmailBanner({ email }: { email: string }) {
+  const { t } = useT();
   const [state, setState] = useState<'idle' | 'sent' | 'error'>('idle');
   const resend = async () => {
     try {
@@ -40,14 +43,14 @@ function VerifyEmailBanner({ email }: { email: string }) {
   };
   return (
     <Alert kind="warning">
-      Confirmez votre adresse <strong>{email}</strong> avec le lien reçu par e-mail. D’ici là, la connexion d’un prestataire, l’équipe, les intégrations et le dossier KYB restent bloqués.{' '}
+      {t('banner.verify', { email })}{' '}
       {state === 'sent' ? (
-        <span>Nouveau lien envoyé.</span>
+        <span>{t('banner.sent')}</span>
       ) : state === 'error' ? (
-        <span>Envoi impossible pour l’instant, réessayez plus tard.</span>
+        <span>{t('banner.sendFailed')}</span>
       ) : (
         <button type="button" className="vp-link-btn" onClick={resend}>
-          Renvoyer le lien
+          {t('banner.resend')}
         </button>
       )}
     </Alert>
@@ -58,6 +61,7 @@ function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { me, org, orgId, setOrgId } = useOrg();
+  const { t, tr } = useT();
   const logout = async () => {
     await api('/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     router.replace('/login');
@@ -66,12 +70,12 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <AppShell
       pathname={pathname}
-      nav={nav(org.role)}
+      nav={nav(org.role, t)}
       home="/app"
       cta={
         canCreate ? (
           <LinkButton href="/app/requests/new" icon="plus">
-            Nouvelle demande
+            {t('nav.new')}
           </LinkButton>
         ) : undefined
       }
@@ -79,9 +83,9 @@ function Shell({ children }: { children: ReactNode }) {
         <>
           <div className="vp-who">
             <strong>{org.displayName}</strong>
-            {me.user.fullName} · {ROLE_LABELS_FR[org.role] ?? org.role}
+            {me.user.fullName} · {tr('role', org.role, ROLE_LABELS_FR[org.role] ?? org.role)}
             {me.organizations.length > 1 && (
-              <select aria-label="Changer d’organisation" className="vp-input" value={orgId} onChange={(e) => setOrgId(e.target.value)}>
+              <select aria-label={t('nav.switchOrg')} className="vp-input" value={orgId} onChange={(e) => setOrgId(e.target.value)}>
                 {me.organizations.map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.displayName}
@@ -89,10 +93,13 @@ function Shell({ children }: { children: ReactNode }) {
                 ))}
               </select>
             )}
+            <div style={{ marginTop: 10 }}>
+              <LangSwitch dark />
+            </div>
           </div>
           <button type="button" className="vp-nav-link" onClick={logout}>
             <Icon name="logout" />
-            Se déconnecter
+            {t('nav.logout')}
           </button>
         </>
       }
@@ -101,7 +108,7 @@ function Shell({ children }: { children: ReactNode }) {
         {(!me.user.emailVerified || org.status !== 'active') && (
           <div className="vp-stack">
             {!me.user.emailVerified && <VerifyEmailBanner email={me.user.email} />}
-            {org.status !== 'active' && <Alert kind="danger">Votre organisation est suspendue. Les nouvelles opérations sont bloquées. Contactez le support VITPAY.</Alert>}
+            {org.status !== 'active' && <Alert kind="danger">{t('banner.suspended')}</Alert>}
           </div>
         )}
         {children}

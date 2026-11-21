@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, EmptyState, errorText, formatDate, Icon, PageHeader, Skeleton } from '@vitpay/ui';
 import { useOrg } from '../org-context';
+import { useT } from '../../i18n';
 
 interface Notification {
   id: string;
@@ -16,6 +17,7 @@ interface Notification {
 
 export default function NotificationsPage() {
   const { orgApi } = useOrg();
+  const { t, tag } = useT();
   const [items, setItems] = useState<Notification[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () =>
@@ -31,8 +33,8 @@ export default function NotificationsPage() {
   return (
     <div className="vp-stack-lg" style={{ maxWidth: 780 }}>
       <PageHeader
-        title="Notifications"
-        subtitle={unread ? `${unread} non lue${unread > 1 ? 's' : ''}` : 'Paiements confirmés, échecs, remboursements et alertes de votre organisation.'}
+        title={t('notif.title')}
+        subtitle={unread ? t('notif.unread', { n: unread }) : t('notif.subtitle')}
         actions={
           unread > 0 ? (
             <Button
@@ -47,7 +49,7 @@ export default function NotificationsPage() {
                 }
               }}
             >
-              Tout marquer comme lu
+              {t('notif.markAll')}
             </Button>
           ) : undefined
         }
@@ -60,8 +62,8 @@ export default function NotificationsPage() {
             <Skeleton height={48} />
           </div>
         ) : !items.length ? (
-          <EmptyState icon="bell" title="Aucune notification">
-            Vous serez prévenu ici dès qu’un client paie ou qu’un paiement échoue.
+          <EmptyState icon="bell" title={t('notif.empty')}>
+            {t('notif.emptyText')}
           </EmptyState>
         ) : (
           <div className="vp-list">
@@ -77,13 +79,13 @@ export default function NotificationsPage() {
                       {n.title}
                       {!n.readAt && <span className="vp-sr"> (non lue)</span>}
                     </span>
-                    <span className="vp-muted vp-small">{formatDate(n.createdAt)}</span>
+                    <span className="vp-muted vp-small">{formatDate(n.createdAt, tag)}</span>
                   </div>
                   <div className="vp-muted">
                     {n.body}{' '}
                     {n.data.requestId && (
                       <a href={`/app/requests/${n.data.requestId}`} style={{ whiteSpace: 'nowrap' }}>
-                        Voir la demande <Icon name="next" style={{ width: 14, height: 14, verticalAlign: 'middle' }} />
+                        {t('notif.see')} <Icon name="next" style={{ width: 14, height: 14, verticalAlign: 'middle' }} />
                       </a>
                     )}
                   </div>

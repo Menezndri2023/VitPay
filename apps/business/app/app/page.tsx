@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, EmptyState, formatDate, formatMoney, Icon, LinkButton, MoneyView, PageHeader, Skeleton, Stat, StatusBadge, TestBadge } from '@vitpay/ui';
 import { useOrg } from './org-context';
+import { useT } from '../i18n';
 import { PaymentRequest, STATUS_LABELS } from './types';
 
 interface Dashboard {
@@ -11,33 +12,34 @@ interface Dashboard {
 }
 
 /** Somme de montants d'une même devise (chaînes décimales exactes : calcul en unités mineures). */
-function sum(list: { total: MoneyView }[]): string {
+function sum(list: { total: MoneyView }[], tag = 'fr-MA'): string {
   const byCur = new Map<string, bigint>();
   for (const x of list) byCur.set(x.total.currency, (byCur.get(x.total.currency) ?? 0n) + BigInt(x.total.minor));
-  if (!byCur.size) return formatMoney({ minor: '0', value: '0.00', currency: 'MAD' });
+  if (!byCur.size) return formatMoney({ minor: '0', value: '0.00', currency: 'MAD' }, tag);
   return [...byCur]
     .map(([currency, minor]) => {
       const neg = minor < 0n;
       const abs = neg ? -minor : minor;
       const value = `${neg ? '-' : ''}${abs / 100n}.${String(abs % 100n).padStart(2, '0')}`;
-      return formatMoney({ minor: String(minor), value, currency });
+      return formatMoney({ minor: String(minor), value, currency }, tag);
     })
     .join(' · ');
 }
 
 function Checklist({ steps }: { steps: { title: string; text: string; done: boolean; href: string; action: string }[] }) {
+  const { t } = useT();
   const done = steps.filter((s) => s.done).length;
   const next = steps.findIndex((s) => !s.done);
   return (
     <Card
-      title="Prêt à encaisser"
+      title={t('dash.ready')}
       actions={
-        <span className="vp-muted vp-small vp-num">
-          {done} sur {steps.length} étapes
+        <span className="vp-muted vp-small">
+          {t('dash.steps', { done, total: steps.length })}
         </span>
       }
     >
-      <div className="vp-progress" role="progressbar" aria-valuemin={0} aria-valuemax={steps.length} aria-valuenow={done} aria-label="Avancement de l’activation">
+      <div className="vp-progress" role="progressbar" aria-valuemin={0} aria-valuemax={steps.length} aria-valuenow={done} aria-label={t('dash.ready')}>
         <span style={{ width: `${(done / steps.length) * 100}%` }} />
       </div>
       <ol className="vp-steps" style={{ marginTop: 8 }}>
@@ -66,6 +68,7 @@ function Checklist({ steps }: { steps: { title: string; text: string; done: bool
 }
 
 function DailyChart({ days }: { days: Dashboard['dailyReceived'] }) {
+  const { t, tag } = useT();
   // 30 jours complets (les jours sans encaissement comptent aussi) ; une devise principale : MAD.
   const series = useMemo(() => {
     const map = new Map(days.filter((d) => d.total.currency === 'MAD').map((d) => [d.day, d]));
@@ -75,17 +78,17 @@ function DailyChart({ days }: { days: Dashboard['dailyReceived'] }) {
       const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - i));
       const key = d.toISOString().slice(0, 10);
       const x = map.get(key);
-      out.push({ day: key, minor: x ? Number(x.total.minor) : 0, label: x ? formatMoney(x.total) : '0 MAD', count: x?.count ?? 0 });
+      out.push({ day: key, minor: x ? Number(x.total.minor) : 0, label: x ? formatMoney(x.total, tag) : '0 MAD', count: x?.count ?? 0 });
     }
     return out;
-  }, [days]);
+  }, [days, tag]);
   const max = Math.max(1, ...series.map((s) => s.minor));
-  const fmt = (iso: string) => new Intl.DateTimeFormat('fr-MA', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(iso));
+  const fmt = (iso: string) => new Intl.DateTimeFormat(tag, { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(iso));
   return (
     <>
-      <div className="vp-bars" role="img" aria-label="Encaissements confirmés par jour sur 30 jours">
+      <div className="vp-bars" role="img" aria-label={t('dash.chart')}>
         {series.map((s) => (
-          <div key={s.day} className="vp-bar" title={`${fmt(s.day)} : ${s.label} (${s.count} paiement${s.count > 1 ? 's' : ''})`}>
+          <div key={s.day} className="vp-bar" title={`${fmt(s.day)} : ${s.label} (${s.count})`}>
             <span style={{ height: `${(s.minor / max) * 100}%` }} />
           </div>
         ))}
@@ -93,7 +96,7 @@ function DailyChart({ days }: { days: Dashboard['dailyReceived'] }) {
       <div className="vp-bars-axis">
         <span>{fmt(series[0]!.day)}</span>
         <span>{fmt(series[15]!.day)}</span>
-        <span>Aujourd’hui</span>
+        <span>{t('dash.today')}</span>
       </div>
     </>
   );
@@ -101,6 +104,7 @@ function DailyChart({ days }: { days: Dashboard['dailyReceived'] }) {
 
 export default function DashboardPage() {
   const { orgApi, org, me } = useOrg();
+  const { t, tr, tag } = useT();
   const [d, setD] = useState<Dashboard | null>(null);
   const [providers, setProviders] = useState<number | null>(null);
   const [recent, setRecent] = useState<PaymentRequest[] | null>(null);
@@ -121,25 +125,25 @@ export default function DashboardPage() {
   const anyRequest = (recent?.length ?? 0) > 0;
 
   const steps = [
-    { title: 'Confirmer votre adresse e-mail', text: 'Le lien vous a été envoyé à l’inscription.', done: me.user.emailVerified, href: '/app', action: 'Voir le bandeau' },
-    { title: 'Connecter votre prestataire de paiement', text: 'Les fonds vont directement de votre client à votre compte chez le prestataire.', done: (providers ?? 0) > 0, href: '/app/settings?tab=providers', action: 'Connecter' },
-    { title: 'Envoyer votre dossier entreprise (KYB)', text: 'Raison sociale, ICE, RC et justificatifs : requis pour passer en paiements réels.', done: org.kybStatus === 'submitted' || org.kybStatus === 'verified', href: '/app/settings?tab=company', action: 'Compléter' },
-    { title: 'Créer votre première demande de paiement', text: 'Un lien et un QR code à envoyer par WhatsApp, SMS ou e-mail.', done: anyRequest, href: '/app/requests/new', action: 'Créer' },
+    { title: t('dash.step.email'), text: t('dash.step.email.text'), done: me.user.emailVerified, href: '/app', action: t('dash.step.email.action') },
+    { title: t('dash.step.provider'), text: t('dash.step.provider.text'), done: (providers ?? 0) > 0, href: '/app/settings?tab=providers', action: t('dash.step.provider.action') },
+    { title: t('dash.step.kyb'), text: t('dash.step.kyb.text'), done: org.kybStatus === 'submitted' || org.kybStatus === 'verified', href: '/app/settings?tab=company', action: t('dash.step.kyb.action') },
+    { title: t('dash.step.first'), text: t('dash.step.first.text'), done: anyRequest, href: '/app/requests/new', action: t('dash.step.first.action') },
   ];
   const showChecklist = isAdmin && providers !== null && recent !== null && steps.some((s) => !s.done);
 
   return (
     <div className="vp-stack-lg">
-      <PageHeader title={`Bonjour, ${me.user.fullName.split(' ')[0]}`} subtitle={`${org.displayName} — activité des 30 derniers jours`} />
+      <PageHeader title={t('dash.hello', { name: me.user.fullName.split(' ')[0] ?? '' })} subtitle={t('dash.subtitle', { org: org.displayName })} />
 
       {showChecklist && <Checklist steps={steps} />}
 
       <div className="vp-grid">
         {d ? (
           <>
-            <Stat icon="wallet" label="Encaissé (30 jours)" value={sum(by('paid'))} hint={`${count('paid')} paiement${count('paid') > 1 ? 's' : ''} confirmé${count('paid') > 1 ? 's' : ''}`} href="/app/requests?status=paid" />
-            <Stat icon="clock" label="En attente de paiement" value={count('open')} hint={by('open').length ? sum(by('open')) : 'Aucune demande ouverte'} href="/app/requests?status=open" />
-            <Stat icon="ban" label="Expirées ou annulées" value={count('expired') + count('cancelled')} hint="Sur 30 jours" />
+            <Stat icon="wallet" label={t('dash.collected')} value={sum(by('paid'), tag)} hint={t('dash.confirmed', { n: count('paid') })} href="/app/requests?status=paid" />
+            <Stat icon="clock" label={t('dash.open')} value={count('open')} hint={by('open').length ? sum(by('open'), tag) : t('dash.noOpen')} href="/app/requests?status=open" />
+            <Stat icon="ban" label={t('dash.closed')} value={count('expired') + count('cancelled')} hint={t('dash.30days')} />
           </>
         ) : (
           <>
@@ -150,13 +154,13 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <Card title="Encaissements confirmés par jour">
+      <Card title={t('dash.chart')}>
         {d ? (
           d.dailyReceived.length ? (
             <DailyChart days={d.dailyReceived} />
           ) : (
-            <EmptyState icon="activity" title="Aucun encaissement sur 30 jours">
-              Les paiements confirmés par votre prestataire apparaîtront ici, jour par jour.
+            <EmptyState icon="activity" title={t('dash.chart.empty')}>
+              {t('dash.chart.emptyText')}
             </EmptyState>
           )
         ) : (
@@ -165,11 +169,11 @@ export default function DashboardPage() {
       </Card>
 
       <Card
-        title="Dernières demandes"
+        title={t('dash.recent')}
         actions={
           anyRequest ? (
             <a href="/app/requests" className="vp-small">
-              Tout voir
+              {t('common.seeAll')}
             </a>
           ) : undefined
         }
@@ -179,16 +183,16 @@ export default function DashboardPage() {
         ) : !recent.length ? (
           <EmptyState
             icon="send"
-            title="Aucune demande pour l’instant"
+            title={t('dash.recent.empty')}
             action={
               org.role !== 'viewer' ? (
                 <LinkButton href="/app/requests/new" icon="plus">
-                  Créer une demande
+                  {t('dash.create')}
                 </LinkButton>
               ) : undefined
             }
           >
-            Créez un lien de paiement, envoyez-le à votre client : il paie par carte depuis son téléphone.
+            {t('dash.recent.emptyText')}
           </EmptyState>
         ) : (
           <div className="vp-list">
@@ -197,12 +201,12 @@ export default function DashboardPage() {
                 <span style={{ minWidth: 0, flex: '1 1 220px' }}>
                   <span style={{ fontWeight: 600, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.description ?? r.customerName ?? r.reference}</span>
                   <span className="vp-muted vp-small">
-                    {formatDate(r.createdAt)} {r.mode === 'sandbox' && <TestBadge />}
+                    {formatDate(r.createdAt, tag)} {r.mode === 'sandbox' && <TestBadge label={t('common.test')} />}
                   </span>
                 </span>
                 <span className="vp-row" style={{ flexWrap: 'nowrap', gap: 10 }}>
-                  <strong className="vp-num">{formatMoney(r.amount)}</strong>
-                  <StatusBadge status={r.status} label={STATUS_LABELS[r.status]} />
+                  <strong className="vp-num">{formatMoney(r.amount, tag)}</strong>
+                  <StatusBadge status={r.status} label={tr('status', r.status, STATUS_LABELS[r.status] ?? r.status)} />
                 </span>
               </a>
             ))}
@@ -211,7 +215,7 @@ export default function DashboardPage() {
       </Card>
 
       <p className="vp-muted vp-small" style={{ margin: 0 }}>
-        Les montants reflètent les confirmations reçues de votre prestataire de paiement. Les fonds sont détenus et reversés par votre prestataire, pas par VITPAY.
+        {t('common.disclaimer')}
       </p>
     </div>
   );

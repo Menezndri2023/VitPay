@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { EnvBanner } from '@vitpay/ui';
 import '@vitpay/ui/src/styles.css';
-import { arabic, inter } from './fonts';
+import { LangProvider } from './i18n';
 
 export const metadata: Metadata = {
   title: 'VITPAY Business',
@@ -14,10 +14,10 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, them
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="fr" className={`${inter.variable} ${arabic.variable}`}>
+    <html lang="fr">
       <body>
         <EnvBanner />
-        {children}
+        <LangProvider>{children}</LangProvider>
       </body>
     </html>
   );

@@ -3,6 +3,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Alert, api, ApiError, PageSkeleton } from '@vitpay/ui';
+import { useT } from '../i18n';
 
 export interface Me {
   user: { id: string; email: string; fullName: string; mfaEnabled: boolean; emailVerified: boolean };
@@ -33,6 +34,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [orgId, setOrgIdState] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const { t } = useT();
 
   const load = useCallback(async () => {
     try {
@@ -68,9 +70,9 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     return (
       <main className="vp-narrow" style={{ paddingTop: 80 }}>
         <Alert kind="danger">
-          VITPAY est momentanément injoignable. Vérifiez votre connexion.{' '}
+          {t('common.loadFailed')}{' '}
           <button type="button" className="vp-link-btn" onClick={() => void load()}>
-            Réessayer
+            {t('common.retry')}
           </button>
         </Alert>
       </main>
@@ -79,7 +81,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     return (
       <main className="vp-narrow" style={{ paddingTop: 80 }}>
         <Alert kind="warning">
-          Votre compte n’est rattaché à aucune organisation (accès retiré ou invitation non acceptée). Contactez l’administrateur de votre organisation ou le support VITPAY.
+          {t('common.noOrg')}
         </Alert>
       </main>
     );
